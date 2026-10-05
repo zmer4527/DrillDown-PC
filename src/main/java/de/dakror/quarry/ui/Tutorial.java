@@ -233,7 +233,10 @@ public class Tutorial {
                   @Override
                   public void run() {
                      Conveyor c = (Conveyor)Game.G.layer.getStructure(2012);
-                     c.setRotation(Direction.East);
+                     // 联机时不改世界：教程步骤是本地 UI 驱动的，改了会让两端分叉
+                     if (c != null && !de.dakror.quarry.net.NetSession.isActive()) {
+                        c.setRotation(Direction.East);
+                     }
                      hasBamboozled = true;
                   }
                });

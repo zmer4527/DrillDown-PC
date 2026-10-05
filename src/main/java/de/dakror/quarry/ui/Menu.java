@@ -381,6 +381,7 @@ public class Menu {
                         Menu.this.save(new Callback<Void>() {
                            public void call(Void data1) {
                               Menu.this.menuButton.setChecked(false);
+                              de.dakror.quarry.net.NetSession.disconnect();
                               Game.G.reset();
                               Quarry.Q.addScene(MainMenu.M);
                               Quarry.Q.dropScene(Game.G);
@@ -388,6 +389,7 @@ public class Menu {
                         });
                      } else {
                         Menu.this.menuButton.setChecked(false);
+                        de.dakror.quarry.net.NetSession.disconnect();
                         Game.G.reset();
                         Quarry.Q.addScene(MainMenu.M);
                         Quarry.Q.dropScene(Game.G);

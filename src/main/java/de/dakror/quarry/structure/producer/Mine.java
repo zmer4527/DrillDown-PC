@@ -5,6 +5,7 @@ import de.dakror.common.libgdx.render.SpriteRenderer;
 import de.dakror.quarry.Const;
 import de.dakror.quarry.game.Item;
 import de.dakror.quarry.game.Layer;
+import de.dakror.quarry.game.SimRandom;
 import de.dakror.quarry.game.Tile;
 import de.dakror.quarry.scenes.Game;
 import de.dakror.quarry.structure.base.Direction;
@@ -88,8 +89,8 @@ public class Mine extends ProducerStructure {
 
    @Override
    protected void pickRandomActiveRecipe() {
-      int x = (int)(Math.random() * 2.0);
-      int y = (int)(Math.random() * 2.0);
+      int x = SimRandom.G.nextInt(2);
+      int y = SimRandom.G.nextInt(2);
       Tile.TileType t = this.layer.get(this.x + x, this.y + y);
       boolean anyRecipe = false;
       int i = 0;

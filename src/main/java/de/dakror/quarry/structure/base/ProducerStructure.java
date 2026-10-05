@@ -14,6 +14,7 @@ import de.dakror.common.libgdx.io.NBT;
 import de.dakror.common.libgdx.render.SpriteRenderer;
 import de.dakror.quarry.Quarry;
 import de.dakror.quarry.game.Item;
+import de.dakror.quarry.game.SimRandom;
 import de.dakror.quarry.scenes.Game;
 import de.dakror.quarry.scenes.GameUi;
 import de.dakror.quarry.structure.base.component.CInventory;
@@ -337,7 +338,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
 
          this.setRecipe(-1);
       } else {
-         this.setRecipe(MathUtils.random(s.recipes.length - 1));
+         this.setRecipe(SimRandom.G.nextInt(s.recipes.length));
       }
    }
 

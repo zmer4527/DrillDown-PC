@@ -10,7 +10,7 @@ import de.dakror.quarry.structure.logistics.Conveyor;
 import de.dakror.quarry.structure.logistics.ElectricConveyorCore;
 import de.dakror.quarry.util.Bounds;
 import de.dakror.quarry.util.Util;
-import java.util.HashMap;
+import java.util.EnumMap;
 import java.util.Iterator;
 import java.util.Set;
 import java.util.Map.Entry;
@@ -19,7 +19,9 @@ public class CInventory extends Component implements IStorage {
    int size;
    int count;
    int outputDock;
-   HashMap<Item.ItemType, Integer> inventory = new HashMap<>();
+   // 必须是 EnumMap：HashMap 的迭代序取决于枚举的身份 hashCode，跨进程不稳，而 pumpOutItems /
+   // remove(category) / getSimilar 都是"取迭代到的第一个"，会让同一存档在两个进程跑出不同结果。
+   EnumMap<Item.ItemType, Integer> inventory = new EnumMap<>(Item.ItemType.class);
    float pumpOutDelay = 0.5F;
    boolean isTubeAtOutput;
    float pumpOutSpeed = 0.5F;

@@ -10,6 +10,9 @@ import de.dakror.quarry.game.Item;
 import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 
@@ -54,14 +57,17 @@ public class Util {
    }
 
    public static void NBTwriteInventory(NBT.Builder builder, Map<Item.ItemType, Integer> map) {
-      short[] types = new short[map.size()];
-      int[] amounts = new int[map.size()];
-      int i = 0;
+      // map 通常是 HashMap，直接迭代 entrySet() 的顺序取决于枚举的身份 hashCode，跨进程不稳定；
+      // 这里按 item 数值排序后再写，保证同一份库存序列化出的字节完全一致（存档可复现、状态哈希可复现）。
+      // 读侧 NBTreadInventory 是按对读回，与顺序无关，所以本改动不影响存档格式。
+      List<Entry<Item.ItemType, Integer>> entries = new ArrayList<>(map.entrySet());
+      entries.sort(Comparator.comparingInt(e -> e.getKey().value));
+      short[] types = new short[entries.size()];
+      int[] amounts = new int[entries.size()];
 
-      for (Entry<Item.ItemType, Integer> r : map.entrySet()) {
-         types[i] = r.getKey().value;
-         amounts[i] = r.getValue();
-         i++;
+      for (int i = 0; i < entries.size(); i++) {
+         types[i] = entries.get(i).getKey().value;
+         amounts[i] = entries.get(i).getValue();
       }
 
       builder.ShortArray("Types", types).IntArray("Amounts", amounts);

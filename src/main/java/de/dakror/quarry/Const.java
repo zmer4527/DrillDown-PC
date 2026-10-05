@@ -1,0 +1,42 @@
+package de.dakror.quarry;
+
+public class Const {
+   public static final byte QSF_VERSION = 23;
+   public static final int DEFAULT_LAYER_SIZE = 64;
+   public static final int CHUNK_SIZE = 32;
+   public static final int TILE_SIZE = 64;
+   public static final int CHUNK_FULL_SIZE = 2048;
+   public static final int STATE_SIZE = 24;
+   public static float H;
+   public static float W;
+   public static float UI_H;
+   public static float UI_W;
+   public static String SFX_FORMAT = ".ogg";
+   public static String MUSIC_FORMAT = ".ogg";
+   public static final int ITEM_COUNT = 256;
+   public static final int STRUCTURE_COUNT = 65536;
+   public static final float Z_STATES = -1.0F;
+   public static final float Z_CABLES = -2.0F;
+   public static final float Z_STRUCTURES = -3.0F;
+   public static final float Z_ITEMS = -4.0F;
+   public static final float Z_TUBES = -5.0F;
+   public static final int TUBE_OFFSET = 12;
+   public static final int ITEM_OFFSET = 20;
+   public static final int CABLE_OFFSET = 24;
+   public static final int CABLE_WIDTH = 8;
+   public static final float MAX_LOUDNESS = 1.25F;
+   public static final int MSG_FILE_PERMISSION = 13;
+   public static final int MSG_DPI = 14;
+   public static final int MSG_PADDING = 15;
+   public static final int MSG_COPY = 17;
+   public static final int MSG_PASTE = 18;
+   public static final int MSG_SELECT_ROOT = 19;
+   public static final int MIN_AUTOSAVE_INTERVAL = 180000;
+   public static final float ITEM_SPEED = 5.0F;
+   public static final int ITEMS_PER_CONVEYOR = 7;
+   public static final float REFUND_PERCENTAGE = 0.25F;
+   public static final float REFUND_CONSIDERATE_PERCENTAGE = 0.8F;
+   public static final int DEFAULT_PUMP_OUT_MAX_FLUID = 500;
+   public static final float DEFAULT_PUMP_OUT_DELAY = 0.5F;
+   public static final int BUILD_RING_ITEM_SIZE = 100;
+}

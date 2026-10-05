@@ -1,0 +1,21 @@
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# 构建产物
+dist/*.zip
+dist/DrillDown_Windows/DrillDown.jar
+dist/DrillDown_Windows/jre/
+
+# 第三方库源码（仅本地参考用，非本工程源码）
+/com/
+/de/
+/net/
+/org/
+/javazoom/

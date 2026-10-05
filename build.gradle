@@ -1,0 +1,78 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'de.dakror'
+version = '1.0'
+
+ext {
+    gdxVersion = '1.9.9'
+    lwjglVersion = '2.9.3'
+    lmlVersion = '1.9.1.9.6'
+}
+
+repositories {
+    maven {
+        name = 'TencentMirror'
+        url = uri('https://mirrors.cloud.tencent.com/nexus/repository/maven-public/')
+        content {
+            // Tencent mirror has the POM but not the jar for this module;
+            // let Maven Central serve it so Gradle can fall through.
+            excludeModule 'com.github.czyzby', 'gdx-lml'
+        }
+    }
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 8
+}
+
+dependencies {
+    implementation "com.badlogicgames.gdx:gdx:$gdxVersion"
+    implementation "com.badlogicgames.gdx:gdx-backend-lwjgl:$gdxVersion"
+    implementation "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
+    implementation "com.badlogicgames.gdx:gdx-tools:$gdxVersion"
+
+    implementation "org.lwjgl.lwjgl:lwjgl:$lwjglVersion"
+    implementation "org.lwjgl.lwjgl:lwjgl_util:$lwjglVersion"
+
+    implementation "com.github.czyzby:gdx-lml:$lmlVersion"
+    implementation "com.github.czyzby:gdx-kiwi:$lmlVersion"
+
+    implementation "org.lz4:lz4-java:1.5.0"
+    implementation "com.badlogicgames.jlayer:jlayer:1.0.1-gdx"
+    implementation "org.jcraft:jorbis:0.0.17"
+    implementation "net.java.jutils:jutils:1.0.0"
+}
+
+application {
+    mainClass = 'de.dakror.quarry.desktop.DesktopLauncher'
+    applicationDefaultJvmArgs = ['-Xmx2G']
+}
+
+jar {
+    archiveBaseName = 'DrillDown'
+    manifest {
+        attributes(
+            'Main-Class': 'de.dakror.quarry.desktop.DesktopLauncher',
+            'Premain-Class': 'de.dakror.modding.stub.StubAgent',
+            'Agent-Class': 'de.dakror.modding.stub.StubAgent',
+            'Launcher-Agent-Class': 'de.dakror.modding.stub.StubAgent',
+            'Can-Redefine-Classes': 'true',
+            'Can-Retransform-Classes': 'true'
+        )
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+}

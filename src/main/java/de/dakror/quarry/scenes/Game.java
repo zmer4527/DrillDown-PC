@@ -2543,7 +2543,10 @@ public class Game extends GameScene {
          this.simTick = tick;
          // 当前所在层同样是"每个玩家自己的视角"：存档里带的是主机的层，applySaveTag 会切过去，
          // 这里在它的换层 runnable 之后排队恢复本机的层（FIFO，所以能看到新 layers）
-         Gdx.app.postRunnable(new Runnable() {
+         // 当前所在层同样是"每个玩家自己的视角"：存档里带的是主机的层，applySaveTag 会切过去，
+         // 这里在它的换层 runnable 之后排队恢复本机的层（FIFO，所以能看到新 layers）。
+         // 走 postUi 是为了在 simLock 内改 layerIndex/layer（模拟线程会读它们）。
+         this.postUi(new Runnable() {
             @Override
             public void run() {
                if (Game.this.layers != null && layerBefore >= 0 && layerBefore < Game.this.layers.size) {

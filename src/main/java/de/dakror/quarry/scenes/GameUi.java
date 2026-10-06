@@ -1389,6 +1389,15 @@ public class GameUi implements Ui {
 
    @Override
    public void hide(Window w) {
+      // Prompt/SeedPrompt 显示时把键盘焦点交给了输入框，隐藏时必须收回。
+      // 否则 Stage.keyboardFocus 指向一个已从舞台移除的 TextField，之后所有按键
+      // 都被它吃掉 —— 表现就是"键盘快捷键（Q 开建造菜单、拆除模式等）全都没反应"。
+      // 只有用过输入框的一端（联机时的客机）会中招。
+      Actor focus = this.stage.getKeyboardFocus();
+      if (focus != null && (focus == w || focus.isDescendantOf(w))) {
+         this.stage.setKeyboardFocus(null);
+      }
+
       w.addAction(Actions.sequence(Actions.fadeOut(0.15F, Interpolation.fade), Actions.removeActor()));
    }
 

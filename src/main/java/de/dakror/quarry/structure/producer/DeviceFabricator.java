@@ -71,7 +71,8 @@ public class DeviceFabricator extends ProducerStructure {
    protected void doProductionStep() {
       super.doProductionStep();
       if (!Game.G.isInfinite()) {
-         Game.G.ui.endOfGame.show();
+         // doProductionStep 跑在模拟线程上，UI 必须回迁
+         Game.G.postUi(() -> Game.G.ui.endOfGame.show());
       }
    }
 }

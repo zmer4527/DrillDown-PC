@@ -154,7 +154,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
             if ((d.filter == null || d.filter.accepts(item)) && this.inputInventories[i].canAccept(item)) {
                this.inputInventories[i].add(item, 1);
                if (this.isClicked()) {
-                  Game.G.ui.updateStructureUIInventory();
+                  Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
                }
 
                if (this.activeRecipe == null) {
@@ -182,7 +182,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
             if (this.inputInventories[i].hasSpace() && d.filter.accepts(item)) {
                int rest = this.inputInventories[i].addWithRest(item, amount);
                if (this.isClicked()) {
-                  Game.G.ui.updateStructureUIInventory();
+                  Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
                }
 
                if (this.activeRecipe == null) {
@@ -327,7 +327,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
                }
 
                if (this.isClicked()) {
-                  Game.G.ui.updateStructureUIInventory();
+                  Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
                }
 
                this.activeItems = new Item.Items(inputs);
@@ -358,6 +358,10 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
    }
 
    protected void updateUI() {
+      if (!Game.isRenderThread()) {
+         Game.G.postUi(this::updateUI);
+         return;
+      }
       if (this.ui != null) {
          if (this.activeRecipe == null) {
             this.ui.setActor(this.waitingLabel);
@@ -414,7 +418,10 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
          }
 
          if (this.ui != null) {
-            this.timeLabel.setText(GameUi.formatResourceAmount(Math.min((float)((int)this.workDelay + 1), this.activeRecipe.workingTime)) + "s");
+            // 数值在这里（持有 simLock 时）算好，只把 setText 丢回渲染线程——
+            // 否则 lambda 稍后执行时 activeRecipe 可能已经变成 null
+            final String time = GameUi.formatResourceAmount(Math.min((float)((int)this.workDelay + 1), this.activeRecipe.workingTime)) + "s";
+            Game.G.postUi(() -> this.timeLabel.setText(time));
          }
 
          if (this.workDelay <= 0.0F) {

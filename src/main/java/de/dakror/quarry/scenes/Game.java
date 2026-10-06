@@ -132,6 +132,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.locks.LockSupport;
 import java.util.Set;
 import java.util.Map.Entry;
 import java.util.regex.Pattern;
@@ -144,7 +145,7 @@ public class Game extends GameScene {
    public static boolean RECORDMODE = false;
    public static boolean SCREENSHOT = false;
    public static boolean FOGMODE = false;
-   public static boolean SINGLE_FRAME = false;
+   public static volatile boolean SINGLE_FRAME = false;
    public static boolean LOCKSTEP = Quarry.Q.prefs.getBoolean("lockstep", false);
    public static boolean UI_VISIBLE = true;
    public static boolean SMOOTH_CAMERA = false;
@@ -169,7 +170,7 @@ public class Game extends GameScene {
    public InputMultiplexer input;
    public final Array<Runnable> renderThreadTasks = new Array();
    public Viewport viewport;
-   private Array<Layer> layers;
+   private volatile Array<Layer> layers;
    private Game.LayerIterable layerIter = new Game.LayerIterable();
    FrameBuffer[] chunkFBOs;
    int layerIndex;
@@ -278,13 +279,25 @@ public class Game extends GameScene {
    final Vector2 activeTile = new Vector2(-1.0F, 0.0F);
    int hoverTileX;
    int hoverTileY;
-   private int gameSpeed = 1;
-   private boolean gamePaused = false;
+   private volatile int gameSpeed = 1;
+   private volatile boolean gamePaused = false;
    public static final double TICK = 1.0 / 60.0;
-   private static final int MAX_TICKS_PER_FRAME = 8;
-   private static final double MAX_FRAME_TIME = 0.25;
-   private double simAccumulator;
-   public long simTick;
+   private static final long TICK_NANOS = (long)(TICK * 1.0E9);
+   /** 等对端命令包时的重试间隔（毫秒）。 */
+   private static final long WAIT_RETRY_MILLIS = 2L;
+   /** 节拍落后超过这个量就丢弃积压，不做"追帧"。 */
+   private static final long MAX_TICK_LAG_NANOS = 200_000_000L;
+   /**
+    * 模拟线程与渲染线程的分界锁，也是全部世界状态的保护锁。
+    * 约定：它是**最外层锁**——layerLock/resourceLock/pfxLock 等都在它内部获取，
+    * 任何路径都不允许"先持其它锁再拿 simLock"，否则会死锁。
+    */
+   private final Object simLock = new Object();
+   private volatile boolean simThreadRunning;
+   private volatile Thread simThread;
+   /** 渲染线程句柄。UI 相关方法用它判断"我现在是不是在渲染线程上"。 */
+   private static volatile Thread renderThread;
+   public volatile long simTick;
    private boolean startNewGame;
    private boolean infinite;
    private Game.LiningUpState liningUpInput = Game.LiningUpState.NoOther;
@@ -323,6 +336,7 @@ public class Game extends GameScene {
    @Override
    public void init() {
       G = this;
+      renderThread = Thread.currentThread();
       this.music = (Music)Quarry.Q.assets.get("music/Fading_into_the_Dream" + Const.MUSIC_FORMAT, Music.class);
       this.input = new InputMultiplexer(new InputProcessor[]{this});
       this.colorShader = new ShaderProgram(Gdx.files.internal("glsl/color.vs"), Gdx.files.internal("glsl/color.fs"));
@@ -367,6 +381,172 @@ public class Game extends GameScene {
          this.tilePathfinding = new AStar<>();
          this.tilePathfinding.setMaxTime(100L);
       }
+
+      this.installLockedInput();
+      this.startSimThread();
+   }
+
+   // ---------- 模拟线程：固定 60Hz 推进世界，与渲染线程解耦 ----------
+
+   private void startSimThread() {
+      if (this.simThread != null) {
+         return;
+      }
+
+      this.simThreadRunning = true;
+      Thread t = new Thread(new Runnable() {
+         @Override
+         public void run() {
+            Game.this.simLoop();
+         }
+      }, "sim");
+      t.setDaemon(true);
+      this.simThread = t;
+      t.start();
+   }
+
+   private void stopSimThread() {
+      this.simThreadRunning = false;
+      Thread t = this.simThread;
+      this.simThread = null;
+      if (t != null) {
+         t.interrupt();
+      }
+   }
+
+   /**
+    * 固定步长模拟循环。窗口失焦/最小化时渲染线程会卡在 GL 呈现上，但那次阻塞发生在
+    * listener.render() 之外，不持有 simLock，所以本线程照常推进——这正是"失焦即冻结"的解法。
+    */
+   private void simLoop() {
+      long next = System.nanoTime();
+      while (this.simThreadRunning) {
+         boolean did = false;
+         synchronized (this.simLock) {
+            if (this.layers == null) {
+               // 还没开局（主菜单加载中），空转等待
+            } else if (SINGLE_FRAME) {
+               SINGLE_FRAME = false;
+               if (NetSession.canAdvance(this.simTick)) {
+                  this.stepSimulation(TICK, this.gameSpeed);
+                  did = true;
+               } else {
+                  NetSession.noteWaiting(this.simTick);
+               }
+            } else if (NetSession.canAdvance(this.simTick)) {
+               this.stepSimulation(TICK, this.gamePaused ? 0 : this.gameSpeed);
+               did = true;
+            } else {
+               // 联机：对端这一 tick 的命令包还没到，停下等，绝不越过 tick
+               NetSession.noteWaiting(this.simTick);
+            }
+         }
+
+         long now = System.nanoTime();
+         if (did) {
+            next += TICK_NANOS;
+            long sleep = next - now;
+            if (sleep > 0L) {
+               LockSupport.parkNanos(sleep);
+            } else if (sleep < -MAX_TICK_LAG_NANOS) {
+               next = now;   // 落后太多就重新对表，不做追帧
+            }
+         } else {
+            next = now;
+            try {
+               Thread.sleep(WAIT_RETRY_MILLIS);
+            } catch (InterruptedException e) {
+               Thread.currentThread().interrupt();
+               return;
+            }
+         }
+      }
+   }
+
+   /** 把一段 UI/音频操作回迁到渲染线程执行——模拟线程碰 UI 必须先经此中转。 */
+   public void postUi(final Runnable r) {
+      Gdx.app.postRunnable(new Runnable() {
+         @Override
+         public void run() {
+            synchronized (Game.this.simLock) {
+               r.run();
+            }
+         }
+      });
+   }
+
+   /** 当前线程是不是渲染线程。UI 方法用它决定是否需要把工作回迁。 */
+   public static boolean isRenderThread() {
+      return Thread.currentThread() == renderThread;
+   }
+
+   /**
+    * 把输入回调纳入 simLock。输入事件在 LwjglInput.processEvents() 里派发，那一步在
+    * listener.render() 之外，不在 update/draw 的锁范围内，所以必须单独包一层。
+    */
+   private void installLockedInput() {
+      final InputProcessor inner = Gdx.input.getInputProcessor();
+      if (inner == null) {
+         return;
+      }
+
+      Gdx.input.setInputProcessor(new InputProcessor() {
+         @Override
+         public boolean keyDown(int keycode) {
+            synchronized (Game.this.simLock) {
+               return inner.keyDown(keycode);
+            }
+         }
+
+         @Override
+         public boolean keyUp(int keycode) {
+            synchronized (Game.this.simLock) {
+               return inner.keyUp(keycode);
+            }
+         }
+
+         @Override
+         public boolean keyTyped(char character) {
+            synchronized (Game.this.simLock) {
+               return inner.keyTyped(character);
+            }
+         }
+
+         @Override
+         public boolean touchDown(int screenX, int screenY, int pointer, int button) {
+            synchronized (Game.this.simLock) {
+               return inner.touchDown(screenX, screenY, pointer, button);
+            }
+         }
+
+         @Override
+         public boolean touchUp(int screenX, int screenY, int pointer, int button) {
+            synchronized (Game.this.simLock) {
+               return inner.touchUp(screenX, screenY, pointer, button);
+            }
+         }
+
+         @Override
+         public boolean touchDragged(int screenX, int screenY, int pointer) {
+            synchronized (Game.this.simLock) {
+               return inner.touchDragged(screenX, screenY, pointer);
+            }
+         }
+
+         @Override
+         public boolean mouseMoved(int screenX, int screenY) {
+            synchronized (Game.this.simLock) {
+               return inner.mouseMoved(screenX, screenY);
+            }
+         }
+
+         @Override
+         public boolean scrolled(int amount) {
+            synchronized (Game.this.simLock) {
+               return inner.scrolled(amount);
+            }
+         }
+      });
    }
 
    protected void initParticles() {
@@ -412,6 +592,12 @@ public class Game extends GameScene {
    }
 
    public void reset() {
+      synchronized (this.simLock) {
+         this.resetLocked();
+      }
+   }
+
+   private void resetLocked() {
       this.ui.tileUI.hide();
       this.ui.tutorial.reset();
       this.resetActiveTile();
@@ -452,6 +638,12 @@ public class Game extends GameScene {
    }
 
    public void newGame() {
+      synchronized (this.simLock) {
+         this.newGameLocked();
+      }
+   }
+
+   private void newGameLocked() {
       this.currentGameName = null;
       this.setPaused(false);
       this.reset();
@@ -565,7 +757,10 @@ public class Game extends GameScene {
                this.camControl.updateActiveElementPlaceable();
             }
 
-            this.layerChangeNotifier.notify(ChangeNotifier.Event.Type.CHANGE, this.layer);
+            // 这个通知不能在模拟线程上发：Layer.onChangeEvent 会 dispose 自己（释放 GL mesh），
+            // LayerSelection 会改 Stage。两者都必须在渲染线程做，所以回迁。
+            final Layer changed = this.layer;
+            this.postUi(() -> this.layerChangeNotifier.notify(ChangeNotifier.Event.Type.CHANGE, changed));
          }
 
          this.deltaLayer = 0;
@@ -605,10 +800,13 @@ public class Game extends GameScene {
    /** 执行一条来自命令流的行为：两端在同一 tick、以同一顺序执行，所以结果一致。 */
    private void applyNetCommand(NetCommand command) {
       switch (command.type) {
-         case NetCommand.PAUSE:
-            this.applyPause(command.p[0] == 1);
-            this.ui.pauseButton.setChecked(command.p[0] == 1);
+         case NetCommand.PAUSE: {
+            final boolean paused = command.p[0] == 1;
+            this.applyPause(paused);
+            // 模拟线程不能直接碰 Stage，回迁到渲染线程
+            this.postUi(() -> this.ui.pauseButton.setChecked(paused));
             break;
+         }
          case NetCommand.SPEED:
             this.applySpeed(command.p[0]);
             break;
@@ -825,6 +1023,14 @@ public class Game extends GameScene {
 
    @Override
    public void update(double deltaTime) {
+      renderThread = Thread.currentThread();
+      synchronized (this.simLock) {
+         this.updateLocked(deltaTime);
+      }
+   }
+
+   /** update 的本体。必须在 simLock 内调用（读世界状态、改相机/UI）。 */
+   private void updateLocked(double deltaTime) {
       if (this.startNewGame) {
          this.newGame();
          this.startNewGame = false;
@@ -915,45 +1121,7 @@ public class Game extends GameScene {
          }
 
          this.camControl.update();
-         if (SINGLE_FRAME) {
-            if (NetSession.canAdvance(this.simTick)) {
-               this.stepSimulation(TICK, this.gameSpeed);
-            } else {
-               NetSession.noteWaiting(this.simTick);
-            }
-
-            this.simAccumulator = 0.0;
-            SINGLE_FRAME = false;
-         } else if (this.gamePaused) {
-            if (NetSession.canAdvance(this.simTick)) {
-               this.stepSimulation(TICK, 0);
-            } else {
-               NetSession.noteWaiting(this.simTick);
-            }
-
-            this.simAccumulator = 0.0;
-         } else {
-            this.simAccumulator += Math.min(deltaTime, MAX_FRAME_TIME);
-            int ticks = 0;
-
-            while (this.simAccumulator >= TICK && ticks < MAX_TICKS_PER_FRAME) {
-               if (!NetSession.canAdvance(this.simTick)) {
-                  // 联机：对端这一 tick 的命令包还没到，停下等，绝不越过 tick
-                  NetSession.noteWaiting(this.simTick);
-                  break;
-               }
-
-               this.stepSimulation(TICK, this.gameSpeed);
-               this.simAccumulator -= TICK;
-               ticks++;
-            }
-
-            if (!LOCKSTEP && !NetSession.isActive() && this.simAccumulator >= TICK) {
-               // 单机：丢弃积压以避免死亡螺旋；锁步/联机下必须保留余量——丢 tick 会让两端模拟分叉，
-               // 宁可卡顿成"慢动作"也不能跳时间。
-               this.simAccumulator = 0.0;
-            }
-         }
+         // 模拟推进已交给 simLoop()（独立线程）。这里只剩渲染侧的工作：相机、UI、音频。
 
          this.ui.update(deltaTime);
          this.spatializer.setCenter(this.cam.position.x, this.cam.position.y, this.cam.zoom / 0.5F);
@@ -1050,6 +1218,13 @@ public class Game extends GameScene {
 
    @Override
    public void draw() {
+      synchronized (this.simLock) {
+         this.drawLocked();
+      }
+   }
+
+   /** draw 的本体。必须在 simLock 内调用（要读世界状态画图）。 */
+   private void drawLocked() {
       if (this.layer != null) {
          Gdx.gl.glClear(16640);
          if (this.saveMap) {
@@ -1957,7 +2132,8 @@ public class Game extends GameScene {
             this.resources.put(item, val);
             this.resourceChangeNotifier.notify(ChangeNotifier.Event.Type.ADD, this.resourceChangePair.set(item, amount));
             this.getSeenResources().add(item);
-            this.ui.updateResources(true);
+            // 可能来自模拟线程（生产），只能置脏标记
+            this.ui.markResourcesDirty();
             if (this.activeStructure != null) {
                this.camControl.updateActiveElementPlaceable();
             }
@@ -2007,7 +2183,7 @@ public class Game extends GameScene {
                   }
                }
 
-               this.ui.updateResources(true);
+               this.ui.markResourcesDirty();
                if (this.activeStructure != null) {
                   this.camControl.updateActiveElementPlaceable();
                }
@@ -2028,7 +2204,7 @@ public class Game extends GameScene {
    public synchronized void addSeenResource(Item.ItemType item) {
       synchronized (resourceLock) {
          if (this.getSeenResources().add(item)) {
-            this.ui.updateResources(true);
+            this.ui.markResourcesDirty();
          }
       }
    }
@@ -2174,6 +2350,14 @@ public class Game extends GameScene {
          save = Quarry.Q.i18n.get("ui.unnamed_save");
       }
 
+      // 序列化会读整个世界状态、并用共享的 NBT 缓冲，必须与模拟线程互斥。
+      // 本方法跑在 Quarry.threadPool 上（见 draw 里的 autosave/thumbnail 分支）。
+      synchronized (this.simLock) {
+         this.saveDataLocked(save, isAutosave, saveMap);
+      }
+   }
+
+   private void saveDataLocked(String save, boolean isAutosave, boolean saveMap) {
       try {
          NBT.Builder metaBuilder = new NBT.Builder("Meta");
          this.playTime = this.getPlayTime();
@@ -2216,14 +2400,14 @@ public class Game extends GameScene {
 
          saveThumbnailCache.remove(file);
          data.free();
-         this.ui.toast.show(Quarry.Q.i18n.get("toast.game_saved"));
+         this.postUi(() -> this.ui.toast.show(Quarry.Q.i18n.get("toast.game_saved")));
          if (this.saveCallback != null) {
             this.saveCallback.call(null);
             this.saveCallback = null;
          }
          } catch (Exception var19) {
             Quarry.Q.pi.message(1, var19);
-            this.ui.toast.show(Quarry.Q.i18n.get("toast.save_error"));
+            this.postUi(() -> this.ui.toast.show(Quarry.Q.i18n.get("toast.save_error")));
          }
    }
 
@@ -2324,6 +2508,13 @@ public class Game extends GameScene {
     * 注意：不推进 simTick，M1c 做锁步时会由主机把 tick 一起带过来。
     */
    public void applyWorldBytes(byte[] bytes, long tick, boolean paused, int speed) {
+      // 由 NetSession 的 postRunnable 触发（渲染线程，但在 render() 之外），必须自己加锁
+      synchronized (this.simLock) {
+         this.applyWorldBytesLocked(bytes, tick, paused, speed);
+      }
+   }
+
+   private void applyWorldBytesLocked(byte[] bytes, long tick, boolean paused, int speed) {
       try {
          NBT.CompoundTag data = this.loadSaveData(new ByteArrayInputStream(bytes));
          NBT.CompoundTag meta = new NBT.Builder("Meta")
@@ -2349,7 +2540,6 @@ public class Game extends GameScene {
          this.cam.position.set(camBefore);
          this.cam.zoom = zoomBefore;
          this.cam.update();
-         this.simAccumulator = 0.0;
          this.simTick = tick;
          // 当前所在层同样是"每个玩家自己的视角"：存档里带的是主机的层，applySaveTag 会切过去，
          // 这里在它的换层 runnable 之后排队恢复本机的层（FIFO，所以能看到新 layers）
@@ -2847,6 +3037,7 @@ public class Game extends GameScene {
 
    @Override
    public void dispose() {
+      this.stopSimThread();
       for (FrameBuffer fbo : this.chunkFBOs) {
          if (fbo != null) {
             fbo.dispose();

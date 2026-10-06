@@ -244,7 +244,7 @@ public class GameUi implements Ui {
    float s;
    float v;
    public static final Drawable trButton = Quarry.Q.skin.newDrawable("button", 1.0F, 1.0F, 1.0F, 0.25F);
-   boolean wantToUpdateResources;
+   volatile boolean wantToUpdateResources;
    boolean debug = false;
    private static HashMap<String, NinePatchDrawable> drawableCache = new HashMap<>();
 
@@ -1419,6 +1419,14 @@ public class GameUi implements Ui {
             }
          }
       }
+   }
+
+   /**
+    * 只置脏标记，不碰 Stage —— 供模拟线程调用。
+    * 实际的资源面板重建由渲染线程每帧的 {@link #updateResources(boolean)} 完成。
+    */
+   public void markResourcesDirty() {
+      this.wantToUpdateResources = true;
    }
 
    public void updateResources(boolean justRegister) {

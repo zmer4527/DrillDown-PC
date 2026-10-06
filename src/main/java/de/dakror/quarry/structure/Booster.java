@@ -363,6 +363,10 @@ public class Booster extends Structure<Schema> {
    }
 
    private void updateUI() {
+      if (!Game.isRenderThread()) {
+         Game.G.postUi(this::updateUI);
+         return;
+      }
       if (this.meshMode && this.mesh.contains(Game.G.ui.currentClickedStructure)) {
          ((Booster)Game.G.ui.currentClickedStructure).updateUI();
       } else {

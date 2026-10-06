@@ -60,8 +60,9 @@ public class NetSession {
    private static final int MAX_FRAME = 268435456;
    private static final int PRUNE_KEEP = 128;
 
-   private static NetSession active;
-   private static String lastStatus = "未连接";
+   // 模拟线程也会调 isActive()/getStatus()，所以这两个必须 volatile
+   private static volatile NetSession active;
+   private static volatile String lastStatus = "未连接";
 
    private final boolean isHost;
    private final String target;

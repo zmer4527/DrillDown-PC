@@ -78,6 +78,10 @@ public class Filter extends RouterStructure {
    }
 
    private void updateUI() {
+      if (!Game.isRenderThread()) {
+         Game.G.postUi(this::updateUI);
+         return;
+      }
       int i = 0;
 
       for (Actor a : ui.getChildren()) {

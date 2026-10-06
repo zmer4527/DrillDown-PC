@@ -2587,6 +2587,8 @@ public class Game extends GameScene {
       } catch (Exception var4) {
          Quarry.Q.pi.message(1, var4);
          System.out.println("[Net] 应用世界失败：" + var4);
+         // 失败也要解除 worldApplying：否则它一直为 true，模拟线程永久停 tick
+         this.worldApplying = false;
       }
    }
 

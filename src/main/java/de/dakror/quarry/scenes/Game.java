@@ -816,6 +816,8 @@ public class Game extends GameScene {
          NetSession.onTickEnd(this.simTick);
          if (NetSession.isAnchored() && this.simTick % NetSession.hashInterval() == 0L) {
             NetSession.sendHash(this.simTick, this.simHash());
+            // 诊断：每次发哈希都打印子系统拆分，联机分叉时靠它定位（对两个窗口的日志即可看出）
+            System.out.println("[Net] debug " + this.simHashDebug());
          }
       }
    }
@@ -3517,6 +3519,60 @@ public class Game extends GameScene {
       }
 
       return h.value();
+   }
+
+   /**
+    * 诊断用：把 simHash 拆成各子系统的哈希，联机分叉时打印，用来定位到底哪部分不一致。
+    */
+   public String simHashDebug() {
+      StringBuilder sb = new StringBuilder();
+      sb.append("tick=").append(this.simTick).append(" infinite=").append(this.infinite);
+
+      SimHash rng = new SimHash();
+      rng.put(Generator.G.getSeed());
+      rng.put(Generator.G.getState());
+      rng.put(SimRandom.G.getState());
+      sb.append(" rng=").append(Long.toHexString(rng.value()));
+
+      synchronized (layerLock) {
+         sb.append(" layers=").append(this.layers.size);
+
+         for (int i = 0; i < this.layers.size; i++) {
+            NBT.Builder b = new NBT.Builder("L");
+            b.List("Map", NBT.TagType.Compound);
+            this.layers.get(i).save(b);
+            b.End();
+            SimHash lh = new SimHash();
+            lh.hashTag(b.Get());
+            sb.append(" L").append(i).append("=").append(Long.toHexString(lh.value()));
+         }
+      }
+
+      SimHash res = new SimHash();
+
+      for (Item.ItemType t : Item.ItemType.values) {
+         res.put(t.ordinal());
+         res.put(this.getResource(t));
+      }
+
+      sb.append(" res=").append(Long.toHexString(res.value()));
+      SimHash seen = new SimHash();
+
+      for (Item.ItemType t : Item.ItemType.values) {
+         seen.put(t.ordinal());
+         seen.put(this.seenResources.contains(t));
+      }
+
+      sb.append(" seen=").append(Long.toHexString(seen.value()));
+      SimHash sci = new SimHash();
+
+      for (Science.ScienceType s : Science.ScienceType.values) {
+         sci.put(s.ordinal());
+         sci.put(this.sciences.contains(s));
+      }
+
+      sb.append(" sci=").append(Long.toHexString(sci.value()));
+      return sb.toString();
    }
 
    public Layer getLayer(int index) {

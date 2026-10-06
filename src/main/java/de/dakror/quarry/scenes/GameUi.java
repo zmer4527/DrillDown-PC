@@ -187,7 +187,7 @@ public class GameUi implements Ui {
    ButtonGroup<Button> buildTabButtons;
    ButtonGroup<Button>[] buildCategoryButtons;
    ScrollPane buildScrollPane;
-   HorizontalGroup buildTabs;
+   VerticalGroup buildTabs;
    ButtonStyle menuButtonStyle;
    ImageButton buildClose;
    ImageButton buildBack;
@@ -699,9 +699,8 @@ public class GameUi implements Ui {
 
    protected void initBuildMenu(Skin skin) {
       this.menuButtonStyle = new ButtonStyle(null, trButton, trButton);
-      this.buildTabs = new HorizontalGroup();
-      this.buildTabs.wrap(true).top().left().rowAlign(10);
-      this.buildTabs.setSize(600.0F, Const.UI_H - 575.0F - (float)Quarry.Q.safeInsets[1] - (float)Quarry.Q.safeInsets[3]);
+      this.buildTabs = new VerticalGroup();
+      this.buildTabs.expand().fill().top().left();
       this.buildTabButtons = new ButtonGroup();
       int tube = this.buildMenuTab(Conveyor.classSchema.icon, Quarry.Q.i18n.get("tab.conveyors"));
       int rout = this.buildMenuTab(Filter.classSchema.icon, Quarry.Q.i18n.get("tab.routers"));
@@ -803,7 +802,7 @@ public class GameUi implements Ui {
       ScrollPaneStyle sps = new ScrollPaneStyle(this.buildScrollPane.getStyle());
       sps.background = getDrawable(skin, "panel_metalDark", 25, 25, 25, 25);
       this.buildScrollPane.setStyle(sps);
-      this.buildScrollPane.setScrollingDisabled(true, true);
+      this.buildScrollPane.setScrollingDisabled(true, false);
       if (Quarry.Q.desktop) {
          this.buildScrollPane.setSize(600.0F, Const.UI_H - 575.0F - (float)Quarry.Q.safeInsets[1] - (float)Quarry.Q.safeInsets[3]);
          this.buildScrollPane.setPosition(70.0F, 434.0F);
@@ -842,7 +841,7 @@ public class GameUi implements Ui {
             }
 
             GameUi.this.buildScrollPane.setActor(GameUi.this.buildTabs);
-            GameUi.this.buildScrollPane.setScrollingDisabled(true, true);
+            GameUi.this.buildScrollPane.setScrollingDisabled(true, false);
             GameUi.this.buildBack.addAction(Actions.sequence(Actions.fadeOut(0.1F), Actions.visible(false)));
          }
       });
@@ -1116,7 +1115,7 @@ public class GameUi implements Ui {
       }
 
       this.buildScrollPane.setActor(this.buildTabs);
-      this.buildScrollPane.setScrollingDisabled(true, true);
+      this.buildScrollPane.setScrollingDisabled(true, false);
       Game.G.resetActiveStructure();
       this.buildClose.addAction(Actions.sequence(Actions.alpha(0.0F), Actions.visible(true), Actions.fadeIn(0.1F)));
       this.buildScrollPane.addAction(Actions.sequence(Actions.alpha(0.0F), Actions.visible(true), Actions.fadeIn(0.1F)));
@@ -1148,23 +1147,17 @@ public class GameUi implements Ui {
    }
 
    protected int buildMenuTab(Drawable icon, String title) {
-      Table t = new Table();
-      t.add(new Image(icon)).size(80.0F);
-      t.row();
-      Label l = new Label(title, Quarry.Q.skin, "small-font", Color.WHITE);
-      l.setAlignment(1);
-      t.add(l).growX().top().center();
       final int index = this.buildTabs.getChildren().size;
       final Button c = new Button(this.menuButtonStyle) {
          public float getPrefHeight() {
             return this.isVisible() ? super.getPrefHeight() : 0.0F;
          }
-
-         public float getPrefWidth() {
-            return this.isVisible() ? super.getPrefWidth() : 0.0F;
-         }
       };
-      c.add(t).size((this.buildTabs.getWidth() - 50.0F) / 2.0F, (this.buildTabs.getHeight() - 40.0F) / 5.0F).top();
+      c.padTop(10.0F);
+      Label l = new Label(title, Quarry.Q.skin);
+      c.add(new Image(icon)).size(80.0F).spaceRight(10.0F);
+      c.add(l).grow().top().left().pad(10.0F);
+      sep(c).spaceTop(10.0F).colspan(2).fillX();
       this.buildTabs.addActor(c);
       this.buildTabButtons.add(c);
       c.addListener(new ChangeListener() {

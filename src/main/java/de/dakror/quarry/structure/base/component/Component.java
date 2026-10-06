@@ -19,6 +19,13 @@ public abstract class Component {
    public void postLoad() {
    }
 
+   /**
+    * 清空未存档的瞬态历史（倒计时、滑动窗口等）。联机发世界前主机会调用，
+    * 让序列化出的世界与"客机全新加载"得到的状态完全一致（否则两端起点不同会分叉）。
+    */
+   public void clearTransientState() {
+   }
+
    public void drawFrame(SpriteRenderer spriter, ShapeRenderer shaper) {
    }
 

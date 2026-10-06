@@ -151,6 +151,13 @@ public class Substation extends Structure<Substation.SubstationSchema> {
    }
 
    @Override
+   public void clearTransientState() {
+      super.clearTransientState();
+      this.powerLevelMean.clear();
+      this.powerInMean.clear();
+      this.powerOutMean.clear();
+   }
+
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       b.Double("power", this.powerLevel);

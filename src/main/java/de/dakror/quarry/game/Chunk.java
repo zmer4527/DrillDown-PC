@@ -701,6 +701,19 @@ public class Chunk implements Disposable, FBOable, Savable {
       return this.structures;
    }
 
+   /** 清空本块内所有结构的瞬态历史（发世界前调用）。 */
+   public void clearTransientState() {
+      synchronized (this.structLock) {
+         for (Structure<?> st : (Structure[])this.structures.items) {
+            if (st == null) {
+               break;
+            }
+
+            st.clearTransientState();
+         }
+      }
+   }
+
    public int getItemCount() {
       synchronized (this.structLock) {
          int sum = 0;

@@ -551,6 +551,13 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
    }
 
    @Override
+   public void clearTransientState() {
+      super.clearTransientState();
+      // powerLevelMean 是 60 帧功率滑动平均，不存档；客机加载后是空的，主机必须同步清空，
+      // 否则生产速率计算（powerLevelMean.getMean()）两端不一致，几 tick 内就分叉。
+      this.powerLevelMean.clear();
+   }
+
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       b.Float("workDelay", this.workDelay).Int("recipe", this.activeRecipeIndex).Double("power", this.powerLevel);

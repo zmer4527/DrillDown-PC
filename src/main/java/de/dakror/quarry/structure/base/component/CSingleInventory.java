@@ -231,6 +231,10 @@ public class CSingleInventory extends Component implements IStorage {
    }
 
    @Override
+   public void clearTransientState() {
+      this.remainingDelay = this.pumpOutDelay;
+   }
+
    public void saveData(NBT.Builder b) {
       b.Compound();
       if (this.item != null) {

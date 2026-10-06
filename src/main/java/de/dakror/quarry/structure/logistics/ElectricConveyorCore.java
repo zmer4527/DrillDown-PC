@@ -310,6 +310,11 @@ public class ElectricConveyorCore extends Conveyor {
    }
 
    @Override
+   public void clearTransientState() {
+      super.clearTransientState();
+      this.powerLevelMean.clear();
+   }
+
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       int[] arr = new int[this.connectedConveyors.size];

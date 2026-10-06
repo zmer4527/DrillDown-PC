@@ -683,6 +683,10 @@ public class NetSession {
                   @Override
                   public void run() {
                      try {
+                        // 发快照前清空所有结构的瞬态历史（滑动窗口、倒计时等）。
+                        // 客机加载出的结构是全新的（这些历史天然为空），主机不同步清空的话，
+                        // 序列化结果与客机恢复出的状态不一致，几 tick 内就 MISMATCH。
+                        Game.G.clearTransientSimState();
                         byte[] nbt = Game.G.serializeWorld();
                         long tick = Game.G.simTick;
                         ByteArrayOutputStream baos = new ByteArrayOutputStream(nbt.length + 13);

@@ -520,6 +520,15 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
       return this.chunks;
    }
 
+   /** 清空本层所有结构的瞬态历史（发世界前调用）。 */
+   public void clearTransientState() {
+      synchronized (this.chunkLock) {
+         for (Chunk c : this.chunks) {
+            c.clearTransientState();
+         }
+      }
+   }
+
    protected void setCollision(Structure<?> s, boolean colliding) {
       for (int i = 0; i < s.getWidth(); i++) {
          int j = (s.x + i) * this.height + s.y;

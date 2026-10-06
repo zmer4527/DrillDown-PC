@@ -490,6 +490,19 @@ public class Game extends GameScene {
       }
    }
 
+   /** 清空所有结构的瞬态历史（滑动窗口、倒计时等）。主机发世界前调用，让序列化结果与客机全新加载一致。 */
+   public void clearTransientSimState() {
+      synchronized (layerLock) {
+         if (this.layers == null) {
+            return;
+         }
+
+         for (Layer l : this.layers) {
+            l.clearTransientState();
+         }
+      }
+   }
+
    /**
     * 把输入回调纳入 simLock。输入事件在 LwjglInput.processEvents() 里派发，那一步在
     * listener.render() 之外，不在 update/draw 的锁范围内，所以必须单独包一层。

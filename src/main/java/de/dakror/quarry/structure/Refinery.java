@@ -408,6 +408,11 @@ public class Refinery extends PausableStructure<PausableSchema> {
    }
 
    @Override
+   public void clearTransientState() {
+      super.clearTransientState();
+      this.powerLevelMean.clear();
+   }
+
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       b.Double("power", this.powerLevel).Float("wt0", this.workingTime0).Float("wt1", this.workingTime1);

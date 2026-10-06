@@ -256,6 +256,11 @@ public class DigitalStorage extends Storage {
    }
 
    @Override
+   public void clearTransientState() {
+      super.clearTransientState();
+      this.powerLevelMean.clear();
+   }
+
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       b.Double("power", this.powerLevel);

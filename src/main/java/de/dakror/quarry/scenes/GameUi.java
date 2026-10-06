@@ -858,42 +858,6 @@ public class GameUi implements Ui {
       this.stage.addActor(this.buildScrollPane);
       this.buildClose.setName("buildClose");
       this.stage.addActor(this.buildClose);
-      if (Quarry.Q.desktop) {
-         this.buildScrollPane.setFlickScroll(false);
-         this.addBuildMenuDragListener(this.buildScrollPane);
-         this.addBuildMenuDragListener(this.buildClose);
-         this.addBuildMenuDragListener(this.buildBack);
-      }
-   }
-
-   /** 给建造菜单加窗口拖动：按住标题/关闭键/返回键拖动即可移动整个菜单。 */
-   protected void addBuildMenuDragListener(Actor actor) {
-      actor.addListener(new InputListener() {
-         float offX;
-         float offY;
-
-         public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-            if (button != 0) {
-               return false;
-            } else {
-               this.offX = event.getStageX() - GameUi.this.buildScrollPane.getX();
-               this.offY = event.getStageY() - GameUi.this.buildScrollPane.getY();
-               return true;
-            }
-         }
-
-         public void touchDragged(InputEvent event, float x, float y, int pointer) {
-            GameUi.this.moveBuildMenu(event.getStageX() - this.offX, event.getStageY() - this.offY);
-         }
-      });
-   }
-
-   protected void moveBuildMenu(float x, float y) {
-      float px = MathUtils.clamp(x, 0.0F, Math.max(0.0F, Const.UI_W - this.buildScrollPane.getWidth()));
-      float py = MathUtils.clamp(y, 0.0F, Math.max(0.0F, Const.UI_H - this.buildScrollPane.getHeight()));
-      this.buildScrollPane.setPosition(px, py);
-      this.buildClose.setPosition(px + this.buildScrollPane.getWidth() - 40.0F, py + this.buildScrollPane.getHeight() - 40.0F);
-      this.buildBack.setPosition(px - this.buildBack.getWidth() + 20.0F, py + this.buildScrollPane.getHeight() - this.buildBack.getHeight() - 20.0F);
    }
 
    protected void initScienceUI(Skin skin) {

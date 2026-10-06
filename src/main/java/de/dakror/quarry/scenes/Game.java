@@ -422,23 +422,37 @@ public class Game extends GameScene {
       long next = System.nanoTime();
       while (this.simThreadRunning) {
          boolean did = false;
-         synchronized (this.simLock) {
-            if (this.layers == null || this.worldApplying) {
-               // 还没开局，或者正在替换世界（联机收世界/重同步），空转等待
-            } else if (SINGLE_FRAME) {
-               SINGLE_FRAME = false;
-               if (NetSession.canAdvance(this.simTick)) {
-                  this.stepSimulation(TICK, this.gameSpeed);
+
+         try {
+            synchronized (this.simLock) {
+               if (this.layers == null || this.worldApplying) {
+                  // 还没开局，或者正在替换世界（联机收世界/重同步），空转等待
+               } else if (SINGLE_FRAME) {
+                  SINGLE_FRAME = false;
+                  if (NetSession.canAdvance(this.simTick)) {
+                     this.stepSimulation(TICK, this.gameSpeed);
+                     did = true;
+                  } else {
+                     NetSession.noteWaiting(this.simTick);
+                  }
+               } else if (NetSession.canAdvance(this.simTick)) {
+                  this.stepSimulation(TICK, this.gamePaused ? 0 : this.gameSpeed);
                   did = true;
                } else {
+                  // 联机：对端这一 tick 的命令包还没到，停下等，绝不越过 tick
                   NetSession.noteWaiting(this.simTick);
                }
-            } else if (NetSession.canAdvance(this.simTick)) {
-               this.stepSimulation(TICK, this.gamePaused ? 0 : this.gameSpeed);
-               did = true;
-            } else {
-               // 联机：对端这一 tick 的命令包还没到，停下等，绝不越过 tick
-               NetSession.noteWaiting(this.simTick);
+            }
+         } catch (Throwable t) {
+            // 模拟线程是 daemon，抛异常会静默结束导致"世界完全定格"——这里吃掉并打印，绝不悄悄死掉
+            System.out.println("[Sim] 模拟线程异常（tick=" + this.simTick + "）：" + t);
+            t.printStackTrace();
+
+            try {
+               Thread.sleep(50L);
+            } catch (InterruptedException ie) {
+               Thread.currentThread().interrupt();
+               return;
             }
          }
 
@@ -2584,6 +2598,9 @@ public class Game extends GameScene {
                   Game.this.layerChangeNotifier.notify(ChangeNotifier.Event.Type.CHANGE, Game.this.layer);
                }
 
+               // 客机加载时某些 loadData 会把瞬态门闩置 true（如 Conveyor.loadData 的 itemChanges），
+               // 而主机在发世界前已清成 false —— 这里同步清掉，保证两端起点一致。
+               Game.this.clearTransientSimState();
                Game.this.worldApplying = false;
             }
          });

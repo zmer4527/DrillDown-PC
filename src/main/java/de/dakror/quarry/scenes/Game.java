@@ -3560,10 +3560,28 @@ public class Game extends GameScene {
                cch.hashTag(cb.Get());
 
                if (ci > 0) {
-                  sb.append(',');
+                  sb.append(' ');
                }
 
                sb.append(ci).append(':').append(Long.toHexString(cch.value()));
+
+               // 逐结构哈希：定位到具体是哪个结构分叉
+               Structure<?>[] ss = (Structure<?>[])cs[ci].getStructures().items;
+
+               for (int si = 0; si < ss.length; si++) {
+                  Structure<?> s = ss[si];
+                  if (s == null) {
+                     break;
+                  }
+
+                  NBT.Builder sbb = new NBT.Builder("S");
+                  sbb.List("Map", NBT.TagType.Compound);
+                  s.save(sbb);
+                  sbb.End();
+                  SimHash srh = new SimHash();
+                  srh.hashTag(sbb.Get());
+                  sb.append(' ').append(s.getSchema().type.name).append('@').append(s.x).append(',').append(s.y).append('=').append(Long.toHexString(srh.value()));
+               }
             }
 
             sb.append(']');

@@ -1,13 +1,35 @@
 # Drill Down
 
-This is the open-sourced codebase of the factory building game Drill Down, released in 2019 on Steam and Google Play.
+工厂建造游戏 **Drill Down** 的反编译桌面重制版（fork）。
 
-Binaries for Android and PC are available at [itch.io](https://dakror.itch.io/drill-down).
+## 原项目
 
-## Building from source
+- 原作者：**Dakror**（Dakror Games）
+- 2019 年发布于 Steam 与 Google Play，2024 年作者将源码开源
+- 许可证：Apache License 2.0（Copyright 2017 Dakror）
+- 原仓库：<https://github.com/Dakror/DrillDown>
+- 可执行版本：[itch.io](https://dakror.itch.io/drill-down)
 
-The game needs 64-bit Java >= 11 and Android Studio to compile.
+## 本仓库的改动
 
-1. Create a java keystore for code signing
-2. Enter the credentials into `gradle.properties`
-3. For Android run `gradlew android:assembleFullRelease`, for PC run `gradlew desktop:dist` to get the runnable binaries
+- 基于原版反编译（CFR）重建的**桌面版**工程（Gradle / Java 8 / libGDX 1.9.9，LWJGL2 后端），仅保留桌面端。
+- **建造菜单窗口拖动**：按住建造菜单的标题 / 关闭键 / 返回键区域拖动，即可把建造菜单窗口移动到屏幕任意位置。
+
+## 构建与运行
+
+需要 64 位 JDK 8。
+
+```bash
+./gradlew build                          # 生成 build/libs/DrillDown-1.0.jar
+java -jar build/libs/DrillDown-1.0.jar   # 运行
+# 或
+./gradlew run
+```
+
+主类：`de.dakror.quarry.desktop.DesktopLauncher`
+
+> 注意：原版 README 中的 Android 构建说明（`gradlew android:assembleFullRelease`、代码签名等）不适用于本仓库 —— 本仓库为桌面版工程。
+
+## 许可证
+
+基于 Dakror 的 **Drill Down**（Apache License 2.0），原版权归 Dakror 所有。

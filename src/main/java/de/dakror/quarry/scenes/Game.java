@@ -423,8 +423,8 @@ public class Game extends GameScene {
       while (this.simThreadRunning) {
          boolean did = false;
          synchronized (this.simLock) {
-            if (this.layers == null) {
-               // 还没开局（主菜单加载中），空转等待
+            if (this.layers == null || this.worldApplying) {
+               // 还没开局，或者正在替换世界（联机收世界/重同步），空转等待
             } else if (SINGLE_FRAME) {
                SINGLE_FRAME = false;
                if (NetSession.canAdvance(this.simTick)) {
@@ -478,6 +478,16 @@ public class Game extends GameScene {
    /** 当前线程是不是渲染线程。UI 方法用它决定是否需要把工作回迁。 */
    public static boolean isRenderThread() {
       return Thread.currentThread() == renderThread;
+   }
+
+   /** 世界正在被替换（联机收世界/重同步），模拟线程在此期间必须停 tick。 */
+   private volatile boolean worldApplying;
+
+   /** 供其它线程（如网络线程的 runnable）在与模拟互斥的前提下读世界状态。 */
+   public void withSimLock(Runnable r) {
+      synchronized (this.simLock) {
+         r.run();
+      }
    }
 
    /**
@@ -791,7 +801,7 @@ public class Game extends GameScene {
       this.simTick++;
       if (NetSession.isActive()) {
          NetSession.onTickEnd(this.simTick);
-         if (this.simTick % NetSession.hashInterval() == 0L) {
+         if (NetSession.isAnchored() && this.simTick % NetSession.hashInterval() == 0L) {
             NetSession.sendHash(this.simTick, this.simHash());
          }
       }
@@ -2508,7 +2518,10 @@ public class Game extends GameScene {
     * 注意：不推进 simTick，M1c 做锁步时会由主机把 tick 一起带过来。
     */
    public void applyWorldBytes(byte[] bytes, long tick, boolean paused, int speed) {
-      // 由 NetSession 的 postRunnable 触发（渲染线程，但在 render() 之外），必须自己加锁
+      // 由 NetSession 的 postRunnable 触发（渲染线程，但在 render() 之外），必须自己加锁。
+      // worldApplying 挡住模拟线程：layers 是在下面的延迟 runnable 里才换上的，
+      // 在那之前模拟线程会拿着"旧世界 + 新 tick 编号"跑，两端必然分叉。
+      this.worldApplying = true;
       synchronized (this.simLock) {
          this.applyWorldBytesLocked(bytes, tick, paused, speed);
       }
@@ -2546,6 +2559,7 @@ public class Game extends GameScene {
          // 当前所在层同样是"每个玩家自己的视角"：存档里带的是主机的层，applySaveTag 会切过去，
          // 这里在它的换层 runnable 之后排队恢复本机的层（FIFO，所以能看到新 layers）。
          // 走 postUi 是为了在 simLock 内改 layerIndex/layer（模拟线程会读它们）。
+         // 它排在 applySaveTag 的换层 runnable 之后，是最后一个，所以在这里解除 worldApplying。
          this.postUi(new Runnable() {
             @Override
             public void run() {
@@ -2554,6 +2568,8 @@ public class Game extends GameScene {
                   Game.this.layer = Game.this.layers.get(layerBefore);
                   Game.this.layerChangeNotifier.notify(ChangeNotifier.Event.Type.CHANGE, Game.this.layer);
                }
+
+               Game.this.worldApplying = false;
             }
          });
          // 暂停/倍速跟随主机（世界 tag 里不带这两个值），且必须立刻生效，

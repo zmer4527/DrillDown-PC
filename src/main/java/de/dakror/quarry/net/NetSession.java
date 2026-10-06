@@ -676,25 +676,36 @@ public class NetSession {
          @Override
          public void run() {
             try {
-               byte[] nbt = Game.G.serializeWorld();
-               long tick = Game.G.simTick;
-               ByteArrayOutputStream baos = new ByteArrayOutputStream(nbt.length + 13);
-               DataOutputStream d = new DataOutputStream(baos);
-               d.writeLong(tick);
-               // 暂停/倍速必须随世界一起过去：只靠命令会在生效前的那几 tick 里两端速度不同，直接判成漂移
-               d.writeByte(Game.G.isPaused() ? 1 : 0);
-               d.writeInt(Game.G.getGameSpeed());
-               d.write(nbt);
-               d.flush();
-               byte[] body = baos.toByteArray();
-               NetSession.markStartTick(tick);
-               NetSession.this.sendFrame(MSG_WORLD, body);
-               NetSession.this.setStatus(
-                  "已发送世界（tick=" + tick + "，" + nbt.length + " 字节）worldHash=" + Long.toHexString(Game.G.worldBytesHash(nbt))
-               );
-            } catch (Exception var8) {
-               Quarry.Q.pi.message(1, var8);
-               NetSession.this.setStatus("序列化世界失败：" + var8);
+               // 必须与模拟线程互斥：否则序列化到一半模拟线程还在改世界，
+               // 快照是"撕开的"，对端以此为起点就永远和主机对不齐（表现为每次收完世界十几 tick 就 MISMATCH）。
+               // simTick 也必须在同一把锁里读，否则可能比快照新一个 tick。
+               Game.G.withSimLock(new Runnable() {
+                  @Override
+                  public void run() {
+                     try {
+                        byte[] nbt = Game.G.serializeWorld();
+                        long tick = Game.G.simTick;
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream(nbt.length + 13);
+                        DataOutputStream d = new DataOutputStream(baos);
+                        d.writeLong(tick);
+                        // 暂停/倍速必须随世界一起过去：只靠命令会在生效前的那几 tick 里两端速度不同，直接判成漂移
+                        d.writeByte(Game.G.isPaused() ? 1 : 0);
+                        d.writeInt(Game.G.getGameSpeed());
+                        d.write(nbt);
+                        d.flush();
+                        byte[] body = baos.toByteArray();
+                        long hash = Game.G.worldBytesHash(nbt);
+                        NetSession.markStartTick(tick);
+                        NetSession.this.sendFrame(MSG_WORLD, body);
+                        NetSession.this.setStatus("已发送世界（tick=" + tick + "，" + nbt.length + " 字节）worldHash=" + Long.toHexString(hash));
+                     } catch (Exception var8) {
+                        Quarry.Q.pi.message(1, var8);
+                        NetSession.this.setStatus("序列化世界失败：" + var8);
+                     }
+                  }
+               });
+            } catch (Exception var9) {
+               Quarry.Q.pi.message(1, var9);
             }
          }
       });
@@ -752,6 +763,12 @@ public class NetSession {
    }
 
    /** 状态变化：控制台 + 游戏内 toast（toast 必须在渲染线程）。 */
+   /** 是否已锚定到对端时间线（主机=已发世界，客户端=已收世界）。锚定前发哈希只会是旧世界的编号。 */
+   public static boolean isAnchored() {
+      NetSession s = active;
+      return s != null && s.startTick >= 0L;
+   }
+
    private void setStatus(final String s) {
       this.status = s;
       lastStatus = s;

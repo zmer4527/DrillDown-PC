@@ -62,6 +62,15 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
    boolean initialized;
    public boolean fake;
    public final Bounds dirtyBounds = new Bounds();
+
+   /**
+    * 模拟专用脏区，与 {@link #dirtyBounds}（渲染用）必须分开。
+    * dirtyBounds 的排空时机取决于"当前层"：当前层由 draw()（渲染线程）排空、
+    * 其它层由 tick 排空 —— 而当前层是每个玩家自己的视角。
+    * 联机时两端各看一层，传送带/电缆的更新（Chunk.update 里 hasWidth/hasFlag 门控）
+    * 就会不一样 → 必然分叉。simBounds 由 tick 对所有层统一排空，保证一致。
+    */
+   public final Bounds simBounds = new Bounds();
    /**
     * 自动拼接专用的脏区队列。与 {@link #dirtyBounds} 分开是必须的：dirtyBounds 的排空时机
     * 取决于渲染（当前层每帧在 draw 里排空、其他层每 tick 在 postUpdate 里排空），而拼接会改动瓦片数据，
@@ -225,7 +234,7 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
       int bh = this.promoteBounds.getHeight();
       synchronized (this.chunkLock) {
          for (Chunk c : this.chunks) {
-            c.update(deltaTime, gameSpeed, this.dirtyBounds);
+            c.update(deltaTime, gameSpeed, this.simBounds);
          }
 
          if (bw > 0 && bh > 0) {
@@ -238,7 +247,7 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
          }
 
          for (Chunk c : this.chunks) {
-            c.postUpdate(this.dirtyBounds);
+            c.postUpdate(this.simBounds);
          }
       }
 
@@ -265,6 +274,16 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
       if (gameSpeed > 0 && Game.G.layer == this) {
          this.updateLoudness(deltaTime);
       }
+
+      // 模拟脏区每个 tick 结束统一排空（对所有层一视同仁）—— 联机确定性的关键。
+      // 渲染用的 dirtyBounds 仍由 draw()/postUpdate() 各自排空，互不影响。
+      this.simBounds.clear();
+   }
+
+   /** 同时标进模拟脏区与渲染脏区。所有"结构变了"的标记都必须走这里。 */
+   public void markDirty(Structure<?> s, int flags) {
+      this.dirtyBounds.add(s, flags);
+      this.simBounds.add(s, flags);
    }
 
    public void postUpdate() {

@@ -550,7 +550,7 @@ public class Chunk implements Disposable, FBOable, Savable {
          CopperCable c = (CopperCable)this.cables.remove(x * 32 + y);
          if (c != null) {
             c.onDestroy();
-            this.layer.dirtyBounds.add(c, 512);
+            this.layer.markDirty(c, 512);
             return true;
          } else {
             return false;
@@ -585,7 +585,7 @@ public class Chunk implements Disposable, FBOable, Savable {
 
                this.layer.setCollision(q, false);
                q.onDestroy();
-               this.layer.dirtyBounds.add(q, 512);
+               this.layer.markDirty(q, 512);
                if (q instanceof StorageStructure) {
                   this.layer.storages.removeValue((StorageStructure)q, true);
                } else if (q instanceof Conveyor) {
@@ -669,7 +669,7 @@ public class Chunk implements Disposable, FBOable, Savable {
          }
 
          if (!fromLoading) {
-            this.layer.dirtyBounds.add(s, 256);
+            this.layer.markDirty(s, 256);
 
             for (Dock d : s.getDocks()) {
                this.layer.setItemNotification(s.x + d.x + d.dir.dx, s.y + d.y + d.dir.dy);

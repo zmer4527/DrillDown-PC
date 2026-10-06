@@ -224,7 +224,7 @@ public abstract class Structure<T extends Schema> implements Savable, QuadTree.R
 
    protected void setDirty() {
       if (this.layer != null) {
-         this.layer.dirtyBounds.add(this, 0);
+         this.layer.markDirty(this, 0);
       }
    }
 

@@ -376,7 +376,7 @@ public class GasTurbine extends GeneratorStructure {
    @Override
    public void setSleeping(boolean sleeping) {
       super.setSleeping(sleeping);
-      this.layer.dirtyBounds.add(this, 0);
+      this.layer.markDirty(this, 0);
    }
 
    private Structure<?> getStructureAt(int x, int y) {

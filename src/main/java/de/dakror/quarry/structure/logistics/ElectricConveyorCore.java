@@ -80,7 +80,7 @@ public class ElectricConveyorCore extends Conveyor {
    private void resetAdjacentConveyors() {
       for (ElectricConveyor p : this.connectedConveyors) {
          p.core = null;
-         this.layer.dirtyBounds.add(p, 1);
+         this.layer.markDirty(p, 1);
       }
 
       this.connectedConveyors.clear();

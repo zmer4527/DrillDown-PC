@@ -64,7 +64,7 @@ public class SolarPanelOutlet extends Structure<Schema> {
 
       for (SolarPanel p : this.connectedPanels) {
          p.outlet = null;
-         this.layer.dirtyBounds.add(p, 0);
+         this.layer.markDirty(p, 0);
       }
 
       this.connectedPanels.clear();

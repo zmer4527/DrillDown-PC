@@ -449,11 +449,12 @@ public class NetSession {
                break;
             }
             case MSG_CMD: {
-               if (this.startTick < 0L) {
-                  // 还没锚定（主机=还没发出世界，客户端=还没收到世界）：这时收到的包是对方旧局的编号，直接丢
-                  break;
-               }
-
+               // 注意：这里**不能**因为 startTick<0 就丢包！
+               // 客户端应用世界需要几百毫秒，这期间主机早已跑过豁免窗口、把 tick=T+8 起的
+               // 命令包都发完了；如果这时丢掉，客户端锚定后永远等不到这些包 → 两端互相等待死锁
+               // （表现为"世界定格在 startTick+8 附近"）。
+               // 先存起来是安全的：锚定前客户端的 canAdvance() 恒为 true（from<0），
+               // 根本不会来查这张表；锚定后只会查 tick>=startTick 的条目，而那些正是有效包。
                long tick = body.readLong();
                int n = body.readShort();
                List<NetCommand> list = new ArrayList<>(n);

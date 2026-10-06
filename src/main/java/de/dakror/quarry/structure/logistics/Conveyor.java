@@ -679,15 +679,6 @@ public class Conveyor extends Structure<Conveyor.ConveyorSchema> implements IRot
    }
 
    @Override
-   public void clearTransientState() {
-      super.clearTransientState();
-      // 这三个是"重新评估物品/方向"的门闩，不存档；发世界前必须清掉——
-      // 否则主机带着 true、客机加载后是 false，快照后第一个 tick 一端处理物品一端不处理 → 物品位置分叉。
-      this.itemChanges = false;
-      this.notification = false;
-      this.touches = false;
-   }
-
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       b.Byte("dir", (byte)this.dir.ordinal());

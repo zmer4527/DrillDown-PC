@@ -304,10 +304,6 @@ public abstract class FluidTubeStructure extends Structure<FluidTubeStructure.Fl
    }
 
    private void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.container == null) {
          this.container = new Container();
       }

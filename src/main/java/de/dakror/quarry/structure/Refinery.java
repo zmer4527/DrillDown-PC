@@ -8,7 +8,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.modified.TextTooltip;
-import de.dakror.quarry.scenes.Game;
 import de.dakror.common.libgdx.io.NBT;
 import de.dakror.common.libgdx.render.SpriteRenderer;
 import de.dakror.quarry.Const;
@@ -348,10 +347,6 @@ public class Refinery extends PausableStructure<PausableSchema> {
    }
 
    private void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.container == null) {
          this.container = new Container();
       }
@@ -408,11 +403,6 @@ public class Refinery extends PausableStructure<PausableSchema> {
    }
 
    @Override
-   public void clearTransientState() {
-      super.clearTransientState();
-      this.powerLevelMean.clear();
-   }
-
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       b.Double("power", this.powerLevel).Float("wt0", this.workingTime0).Float("wt1", this.workingTime1);

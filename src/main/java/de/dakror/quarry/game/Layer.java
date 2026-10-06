@@ -62,23 +62,6 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
    boolean initialized;
    public boolean fake;
    public final Bounds dirtyBounds = new Bounds();
-
-   /**
-    * 模拟专用脏区，与 {@link #dirtyBounds}（渲染用）必须分开。
-    * dirtyBounds 的排空时机取决于"当前层"：当前层由 draw()（渲染线程）排空、
-    * 其它层由 tick 排空 —— 而当前层是每个玩家自己的视角。
-    * 联机时两端各看一层，传送带/电缆的更新（Chunk.update 里 hasWidth/hasFlag 门控）
-    * 就会不一样 → 必然分叉。simBounds 由 tick 对所有层统一排空，保证一致。
-    */
-   public final Bounds simBounds = new Bounds();
-   /**
-    * 自动拼接专用的脏区队列。与 {@link #dirtyBounds} 分开是必须的：dirtyBounds 的排空时机
-    * 取决于渲染（当前层每帧在 draw 里排空、其他层每 tick 在 postUpdate 里排空），而拼接会改动瓦片数据，
-    * 属于模拟状态——一旦跟渲染共用，两端会因为帧率/所处层不同而拼出不同结果（哈希不一致）。
-    * 这里只由 Layer.set 写入、由 Layer.update 在 tick 内消费，完全确定。
-    */
-   public final Bounds promoteBounds = new Bounds();
-   private final Bounds promoteTile = new Bounds();
    public final Bounds lastBounds = new Bounds();
    public final Bounds pendingBounds = new Bounds();
    long timeSum = 0L;
@@ -227,27 +210,13 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
    }
 
    public void update(double deltaTime, int gameSpeed) {
-      // 拼接用独立的、tick 内确定性的脏区队列（不吃渲染时序，也不受当前所在层影响）
-      int bx = this.promoteBounds.getX();
-      int by = this.promoteBounds.getY();
-      int bw = this.promoteBounds.getWidth();
-      int bh = this.promoteBounds.getHeight();
       synchronized (this.chunkLock) {
          for (Chunk c : this.chunks) {
-            c.update(deltaTime, gameSpeed, this.simBounds);
-         }
-
-         if (bw > 0 && bh > 0) {
-            for (Chunk c : this.chunks) {
-               c.promoteSurroundedTiles(bx, by, bw, bh);
-            }
-
-            // 拼接过程中自己的 set() 会往 promoteBounds 里追加，留给下一个 tick 处理（级联，确定）
-            this.promoteBounds.clear();
+            c.update(deltaTime, gameSpeed, this.dirtyBounds);
          }
 
          for (Chunk c : this.chunks) {
-            c.postUpdate(this.simBounds);
+            c.postUpdate(this.dirtyBounds);
          }
       }
 
@@ -274,16 +243,6 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
       if (gameSpeed > 0 && Game.G.layer == this) {
          this.updateLoudness(deltaTime);
       }
-
-      // 模拟脏区每个 tick 结束统一排空（对所有层一视同仁）—— 联机确定性的关键。
-      // 渲染用的 dirtyBounds 仍由 draw()/postUpdate() 各自排空，互不影响。
-      this.simBounds.clear();
-   }
-
-   /** 同时标进模拟脏区与渲染脏区。所有"结构变了"的标记都必须走这里。 */
-   public void markDirty(Structure<?> s, int flags) {
-      this.dirtyBounds.add(s, flags);
-      this.simBounds.add(s, flags);
    }
 
    public void postUpdate() {
@@ -520,15 +479,6 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
       return this.chunks;
    }
 
-   /** 清空本层所有结构的瞬态历史（发世界前调用）。 */
-   public void clearTransientState() {
-      synchronized (this.chunkLock) {
-         for (Chunk c : this.chunks) {
-            c.clearTransientState();
-         }
-      }
-   }
-
    protected void setCollision(Structure<?> s, boolean colliding) {
       for (int i = 0; i < s.getWidth(); i++) {
          int j = (s.x + i) * this.height + s.y;
@@ -717,24 +667,6 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
       }
    }
 
-   /**
-    * 纯装饰性随机（tile 变体贴图位/旋转位）用位置哈希，而不是 SimRandom。
-    * 原因：Chunk.draw 会在渲染阶段调用 set()，若消耗共享随机流，地图内容就会依赖渲染时机
-    * （滚动、分辨率、可见区块），联机时必然不同步。位置哈希对随机流零影响，各端结果一致。
-    */
-   public static float varRandom(int x, int y, int salt) {
-      long h = Generator.G.getSeed() * -7046029254386353131L;
-      h = h * 31L + (long)x * 73856093L;
-      h = h * 31L + (long)y * 19349663L;
-      h = h * 31L + (long)salt;
-      h ^= h >>> 33;
-      h *= -49064778989728563L;
-      h ^= h >>> 33;
-      h *= -4265267296055464877L;
-      h ^= h >>> 33;
-      return (float)((h >>> 11) / (double)(1L << 53));
-   }
-
    public synchronized void set(int x, int y, Tile.TileType tile) {
       if (x >= 0 && y >= 0 && x < this.width && y < this.height) {
          Chunk c = this.getChunk(x, y);
@@ -746,12 +678,12 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
 
             c.data[addr] = (short)tile.value;
             byte meta = tile.meta;
-            if ((tile.meta & 2) == 2 && varRandom(x, y, 0) >= 0.5F) {
+            if ((tile.meta & 2) == 2 && Math.random() >= 0.5) {
                meta = (byte)(meta | 2);
             }
 
             if ((tile.meta & 4) == 4) {
-               float rot = varRandom(x, y, 1);
+               float rot = (float)Math.random();
                if (rot >= 0.75F) {
                   meta = (byte)(meta | 36);
                } else if (rot >= 0.5F) {
@@ -764,13 +696,6 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
             c.data[addr] = (short)(c.data[addr] | meta << 8);
             c.dirty = true;
             this.markSurroundingTilesAsDirty(x, y);
-            // 记进"待拼接"队列：自己 + 周围一圈（同化要看的正是邻格）
-            if (this.promoteBounds.isEmpty()) {
-               this.promoteBounds.set(x - 1, y - 1, 3, 3, 0);
-            } else {
-               this.promoteTile.set(x - 1, y - 1, 3, 3, 0);
-               this.promoteBounds.add(this.promoteTile);
-            }
          }
       }
    }
@@ -950,12 +875,6 @@ public class Layer implements Disposable, Savable, ChangeNotifier.Listener<Layer
    }
 
    public void postAllLayersLoad(boolean firstCycle) {
-      if (firstCycle) {
-         // 读档/收世界后把整层标进待拼接队列：让两端的同化状态收敛到同一结果
-         // （否则"存档快照前刚 set 过、还没同化"的那一格，主机下一 tick 会同化，客户端永远不会）
-         this.promoteBounds.set(0, 0, this.width, this.height, 0);
-      }
-
       synchronized (this.chunkLock) {
          for (Chunk c : this.chunks) {
             c.postAllLayersLoad(firstCycle);

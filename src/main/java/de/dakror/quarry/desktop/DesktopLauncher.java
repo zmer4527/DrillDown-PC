@@ -66,10 +66,7 @@ public class DesktopLauncher implements PlatformInterface {
          mode = GameBase.WindowMode.Borderless;
       }
 
-      // 关掉垂直同步：开了之后 Display.update() 会阻塞等垂直回扫，窗口被遮挡/最小化/切工作区时
-      // 合成器可能把交换挂起，整个渲染循环卡住 → Game.update 不执行 → 模拟"静止"。
-      // 关掉后由下面的 Display.sync(帧率) 用定时器限帧。
-      config.vSyncEnabled = false;
+      config.vSyncEnabled = true;
       config.audioDeviceSimultaneousSources = 32;
       int versionCode = 122;
       String version = "v122";

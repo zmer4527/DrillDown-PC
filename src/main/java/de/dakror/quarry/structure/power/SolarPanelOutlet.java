@@ -7,7 +7,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.Array;
-import de.dakror.quarry.scenes.Game;
 import de.dakror.common.libgdx.io.NBT;
 import de.dakror.common.libgdx.render.SpriteRenderer;
 import de.dakror.quarry.Quarry;
@@ -64,7 +63,7 @@ public class SolarPanelOutlet extends Structure<Schema> {
 
       for (SolarPanel p : this.connectedPanels) {
          p.outlet = null;
-         this.layer.markDirty(p, 0);
+         this.layer.dirtyBounds.add(p, 0);
       }
 
       this.connectedPanels.clear();
@@ -92,10 +91,6 @@ public class SolarPanelOutlet extends Structure<Schema> {
    }
 
    private void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.container == null) {
          this.container = new Container();
       }

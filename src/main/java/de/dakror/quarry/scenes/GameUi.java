@@ -187,7 +187,7 @@ public class GameUi implements Ui {
    ButtonGroup<Button> buildTabButtons;
    ButtonGroup<Button>[] buildCategoryButtons;
    ScrollPane buildScrollPane;
-   VerticalGroup buildTabs;
+   HorizontalGroup buildTabs;
    ButtonStyle menuButtonStyle;
    ImageButton buildClose;
    ImageButton buildBack;
@@ -244,7 +244,7 @@ public class GameUi implements Ui {
    float s;
    float v;
    public static final Drawable trButton = Quarry.Q.skin.newDrawable("button", 1.0F, 1.0F, 1.0F, 0.25F);
-   volatile boolean wantToUpdateResources;
+   boolean wantToUpdateResources;
    boolean debug = false;
    private static HashMap<String, NinePatchDrawable> drawableCache = new HashMap<>();
 
@@ -306,7 +306,6 @@ public class GameUi implements Ui {
       this.tutorial = new Tutorial(this.stage, skin);
       this.endOfGame = new EndOfGame(this.stage);
    }
-
 
    public void clampToInsets(Actor actor) {
       if (actor.getX() < (float)Quarry.Q.safeInsets[0]) {
@@ -562,8 +561,6 @@ public class GameUi implements Ui {
             Quarry.Q.sound.play(Quarry.Q.clickSfx);
             Game.G.resetSpeed();
             Game.G.setPaused(GameUi.this.pauseButton.isChecked());
-            // 联机时暂停由主机裁决，按钮跟随实际状态，避免显示与真实状态不一致
-            GameUi.this.pauseButton.setChecked(Game.G.isPaused());
          }
       }, "button.pause");
       ImageButtonStyle style = this.pauseButton.getStyle();
@@ -702,8 +699,9 @@ public class GameUi implements Ui {
 
    protected void initBuildMenu(Skin skin) {
       this.menuButtonStyle = new ButtonStyle(null, trButton, trButton);
-      this.buildTabs = new VerticalGroup();
-      this.buildTabs.expand().fill().top().left();
+      this.buildTabs = new HorizontalGroup();
+      this.buildTabs.wrap(true).top().left().rowAlign(10);
+      this.buildTabs.setSize(600.0F, Const.UI_H - 575.0F - (float)Quarry.Q.safeInsets[1] - (float)Quarry.Q.safeInsets[3]);
       this.buildTabButtons = new ButtonGroup();
       int tube = this.buildMenuTab(Conveyor.classSchema.icon, Quarry.Q.i18n.get("tab.conveyors"));
       int rout = this.buildMenuTab(Filter.classSchema.icon, Quarry.Q.i18n.get("tab.routers"));
@@ -805,7 +803,7 @@ public class GameUi implements Ui {
       ScrollPaneStyle sps = new ScrollPaneStyle(this.buildScrollPane.getStyle());
       sps.background = getDrawable(skin, "panel_metalDark", 25, 25, 25, 25);
       this.buildScrollPane.setStyle(sps);
-      this.buildScrollPane.setScrollingDisabled(true, false);
+      this.buildScrollPane.setScrollingDisabled(true, true);
       if (Quarry.Q.desktop) {
          this.buildScrollPane.setSize(600.0F, Const.UI_H - 575.0F - (float)Quarry.Q.safeInsets[1] - (float)Quarry.Q.safeInsets[3]);
          this.buildScrollPane.setPosition(70.0F, 434.0F);
@@ -844,7 +842,7 @@ public class GameUi implements Ui {
             }
 
             GameUi.this.buildScrollPane.setActor(GameUi.this.buildTabs);
-            GameUi.this.buildScrollPane.setScrollingDisabled(true, false);
+            GameUi.this.buildScrollPane.setScrollingDisabled(true, true);
             GameUi.this.buildBack.addAction(Actions.sequence(Actions.fadeOut(0.1F), Actions.visible(false)));
          }
       });
@@ -860,41 +858,6 @@ public class GameUi implements Ui {
       this.stage.addActor(this.buildScrollPane);
       this.buildClose.setName("buildClose");
       this.stage.addActor(this.buildClose);
-      if (Quarry.Q.desktop) {
-         this.buildScrollPane.setFlickScroll(false);
-         this.addBuildMenuDragListener(this.buildScrollPane);
-         this.addBuildMenuDragListener(this.buildClose);
-         this.addBuildMenuDragListener(this.buildBack);
-      }
-   }
-
-   protected void addBuildMenuDragListener(Actor actor) {
-      actor.addListener(new InputListener() {
-         float offX;
-         float offY;
-
-         public boolean touchDown(InputEvent event, float x, float y, int pointer, int button) {
-            if (button != 0) {
-               return false;
-            } else {
-               this.offX = event.getStageX() - GameUi.this.buildScrollPane.getX();
-               this.offY = event.getStageY() - GameUi.this.buildScrollPane.getY();
-               return true;
-            }
-         }
-
-         public void touchDragged(InputEvent event, float x, float y, int pointer) {
-            GameUi.this.moveBuildMenu(event.getStageX() - this.offX, event.getStageY() - this.offY);
-         }
-      });
-   }
-
-   protected void moveBuildMenu(float x, float y) {
-      float px = MathUtils.clamp(x, 0.0F, Math.max(0.0F, Const.UI_W - this.buildScrollPane.getWidth()));
-      float py = MathUtils.clamp(y, 0.0F, Math.max(0.0F, Const.UI_H - this.buildScrollPane.getHeight()));
-      this.buildScrollPane.setPosition(px, py);
-      this.buildClose.setPosition(px + this.buildScrollPane.getWidth() - 40.0F, py + this.buildScrollPane.getHeight() - 40.0F);
-      this.buildBack.setPosition(px - this.buildBack.getWidth() + 20.0F, py + this.buildScrollPane.getHeight() - this.buildBack.getHeight() - 20.0F);
    }
 
    protected void initScienceUI(Skin skin) {
@@ -1153,7 +1116,7 @@ public class GameUi implements Ui {
       }
 
       this.buildScrollPane.setActor(this.buildTabs);
-      this.buildScrollPane.setScrollingDisabled(true, false);
+      this.buildScrollPane.setScrollingDisabled(true, true);
       Game.G.resetActiveStructure();
       this.buildClose.addAction(Actions.sequence(Actions.alpha(0.0F), Actions.visible(true), Actions.fadeIn(0.1F)));
       this.buildScrollPane.addAction(Actions.sequence(Actions.alpha(0.0F), Actions.visible(true), Actions.fadeIn(0.1F)));
@@ -1185,17 +1148,23 @@ public class GameUi implements Ui {
    }
 
    protected int buildMenuTab(Drawable icon, String title) {
+      Table t = new Table();
+      t.add(new Image(icon)).size(80.0F);
+      t.row();
+      Label l = new Label(title, Quarry.Q.skin, "small-font", Color.WHITE);
+      l.setAlignment(1);
+      t.add(l).growX().top().center();
       final int index = this.buildTabs.getChildren().size;
       final Button c = new Button(this.menuButtonStyle) {
          public float getPrefHeight() {
             return this.isVisible() ? super.getPrefHeight() : 0.0F;
          }
+
+         public float getPrefWidth() {
+            return this.isVisible() ? super.getPrefWidth() : 0.0F;
+         }
       };
-      c.padTop(10.0F);
-      Label l = new Label(title, Quarry.Q.skin);
-      c.add(new Image(icon)).size(80.0F).spaceRight(10.0F);
-      c.add(l).grow().top().left().pad(10.0F);
-      sep(c).spaceTop(10.0F).colspan(2).fillX();
+      c.add(t).size((this.buildTabs.getWidth() - 50.0F) / 2.0F, (this.buildTabs.getHeight() - 40.0F) / 5.0F).top();
       this.buildTabs.addActor(c);
       this.buildTabButtons.add(c);
       c.addListener(new ChangeListener() {
@@ -1389,15 +1358,6 @@ public class GameUi implements Ui {
 
    @Override
    public void hide(Window w) {
-      // Prompt/SeedPrompt 显示时把键盘焦点交给了输入框，隐藏时必须收回。
-      // 否则 Stage.keyboardFocus 指向一个已从舞台移除的 TextField，之后所有按键
-      // 都被它吃掉 —— 表现就是"键盘快捷键（Q 开建造菜单、拆除模式等）全都没反应"。
-      // 只有用过输入框的一端（联机时的客机）会中招。
-      Actor focus = this.stage.getKeyboardFocus();
-      if (focus != null && (focus == w || focus.isDescendantOf(w))) {
-         this.stage.setKeyboardFocus(null);
-      }
-
       w.addAction(Actions.sequence(Actions.fadeOut(0.15F, Interpolation.fade), Actions.removeActor()));
    }
 
@@ -1428,14 +1388,6 @@ public class GameUi implements Ui {
             }
          }
       }
-   }
-
-   /**
-    * 只置脏标记，不碰 Stage —— 供模拟线程调用。
-    * 实际的资源面板重建由渲染线程每帧的 {@link #updateResources(boolean)} 完成。
-    */
-   public void markResourcesDirty() {
-      this.wantToUpdateResources = true;
    }
 
    public void updateResources(boolean justRegister) {

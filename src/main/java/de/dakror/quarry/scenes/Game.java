@@ -39,7 +39,6 @@ import com.badlogic.gdx.utils.IntSet.IntSetIterator;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import de.dakror.common.Callback;
-import de.dakror.common.Response;
 import de.dakror.common.debug.Delta;
 import de.dakror.common.libgdx.ChangeNotifier;
 import de.dakror.common.libgdx.EditorCameraControl;
@@ -60,14 +59,10 @@ import de.dakror.quarry.game.Item;
 import de.dakror.quarry.game.Layer;
 import de.dakror.quarry.game.LoadingCompat;
 import de.dakror.quarry.game.Science;
-import de.dakror.quarry.game.SimHash;
-import de.dakror.quarry.game.SimRandom;
 import de.dakror.quarry.game.Tile;
 import de.dakror.quarry.game.power.Edge;
 import de.dakror.quarry.game.power.PowerGrid;
 import de.dakror.quarry.game.power.PowerNetwork;
-import de.dakror.quarry.net.NetCommand;
-import de.dakror.quarry.net.NetSession;
 import de.dakror.quarry.structure.Boiler;
 import de.dakror.quarry.structure.DistillationColumn;
 import de.dakror.quarry.structure.Refinery;
@@ -121,7 +116,6 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -132,7 +126,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.locks.LockSupport;
 import java.util.Set;
 import java.util.Map.Entry;
 import java.util.regex.Pattern;
@@ -145,8 +138,7 @@ public class Game extends GameScene {
    public static boolean RECORDMODE = false;
    public static boolean SCREENSHOT = false;
    public static boolean FOGMODE = false;
-   public static volatile boolean SINGLE_FRAME = false;
-   public static boolean LOCKSTEP = Quarry.Q.prefs.getBoolean("lockstep", false);
+   public static boolean SINGLE_FRAME = false;
    public static boolean UI_VISIBLE = true;
    public static boolean SMOOTH_CAMERA = false;
    public static boolean INCREASE_MODE = Quarry.Q.prefs.getBoolean("increase_mode", false);
@@ -170,7 +162,7 @@ public class Game extends GameScene {
    public InputMultiplexer input;
    public final Array<Runnable> renderThreadTasks = new Array();
    public Viewport viewport;
-   private volatile Array<Layer> layers;
+   private Array<Layer> layers;
    private Game.LayerIterable layerIter = new Game.LayerIterable();
    FrameBuffer[] chunkFBOs;
    int layerIndex;
@@ -279,25 +271,8 @@ public class Game extends GameScene {
    final Vector2 activeTile = new Vector2(-1.0F, 0.0F);
    int hoverTileX;
    int hoverTileY;
-   private volatile int gameSpeed = 1;
-   private volatile boolean gamePaused = false;
-   public static final double TICK = 1.0 / 60.0;
-   private static final long TICK_NANOS = (long)(TICK * 1.0E9);
-   /** 等对端命令包时的重试间隔（毫秒）。 */
-   private static final long WAIT_RETRY_MILLIS = 2L;
-   /** 节拍落后超过这个量就丢弃积压，不做"追帧"。 */
-   private static final long MAX_TICK_LAG_NANOS = 200_000_000L;
-   /**
-    * 模拟线程与渲染线程的分界锁，也是全部世界状态的保护锁。
-    * 约定：它是**最外层锁**——layerLock/resourceLock/pfxLock 等都在它内部获取，
-    * 任何路径都不允许"先持其它锁再拿 simLock"，否则会死锁。
-    */
-   private final Object simLock = new Object();
-   private volatile boolean simThreadRunning;
-   private volatile Thread simThread;
-   /** 渲染线程句柄。UI 相关方法用它判断"我现在是不是在渲染线程上"。 */
-   private static volatile Thread renderThread;
-   public volatile long simTick;
+   private int gameSpeed = 1;
+   private boolean gamePaused = false;
    private boolean startNewGame;
    private boolean infinite;
    private Game.LiningUpState liningUpInput = Game.LiningUpState.NoOther;
@@ -336,7 +311,6 @@ public class Game extends GameScene {
    @Override
    public void init() {
       G = this;
-      renderThread = Thread.currentThread();
       this.music = (Music)Quarry.Q.assets.get("music/Fading_into_the_Dream" + Const.MUSIC_FORMAT, Music.class);
       this.input = new InputMultiplexer(new InputProcessor[]{this});
       this.colorShader = new ShaderProgram(Gdx.files.internal("glsl/color.vs"), Gdx.files.internal("glsl/color.fs"));
@@ -381,209 +355,6 @@ public class Game extends GameScene {
          this.tilePathfinding = new AStar<>();
          this.tilePathfinding.setMaxTime(100L);
       }
-
-      this.installLockedInput();
-      this.startSimThread();
-   }
-
-   // ---------- 模拟线程：固定 60Hz 推进世界，与渲染线程解耦 ----------
-
-   private void startSimThread() {
-      if (this.simThread != null) {
-         return;
-      }
-
-      this.simThreadRunning = true;
-      Thread t = new Thread(new Runnable() {
-         @Override
-         public void run() {
-            Game.this.simLoop();
-         }
-      }, "sim");
-      t.setDaemon(true);
-      this.simThread = t;
-      t.start();
-   }
-
-   private void stopSimThread() {
-      this.simThreadRunning = false;
-      Thread t = this.simThread;
-      this.simThread = null;
-      if (t != null) {
-         t.interrupt();
-      }
-   }
-
-   /**
-    * 固定步长模拟循环。窗口失焦/最小化时渲染线程会卡在 GL 呈现上，但那次阻塞发生在
-    * listener.render() 之外，不持有 simLock，所以本线程照常推进——这正是"失焦即冻结"的解法。
-    */
-   private void simLoop() {
-      long next = System.nanoTime();
-      while (this.simThreadRunning) {
-         boolean did = false;
-
-         try {
-            synchronized (this.simLock) {
-               if (this.layers == null || this.worldApplying) {
-                  // 还没开局，或者正在替换世界（联机收世界/重同步），空转等待
-               } else if (SINGLE_FRAME) {
-                  SINGLE_FRAME = false;
-                  if (NetSession.canAdvance(this.simTick)) {
-                     this.stepSimulation(TICK, this.gameSpeed);
-                     did = true;
-                  } else {
-                     NetSession.noteWaiting(this.simTick);
-                  }
-               } else if (NetSession.canAdvance(this.simTick)) {
-                  this.stepSimulation(TICK, this.gamePaused ? 0 : this.gameSpeed);
-                  did = true;
-               } else {
-                  // 联机：对端这一 tick 的命令包还没到，停下等，绝不越过 tick
-                  NetSession.noteWaiting(this.simTick);
-               }
-            }
-         } catch (Throwable t) {
-            // 模拟线程是 daemon，抛异常会静默结束导致"世界完全定格"——这里吃掉并打印，绝不悄悄死掉
-            System.out.println("[Sim] 模拟线程异常（tick=" + this.simTick + "）：" + t);
-            t.printStackTrace();
-
-            try {
-               Thread.sleep(50L);
-            } catch (InterruptedException ie) {
-               Thread.currentThread().interrupt();
-               return;
-            }
-         }
-
-         long now = System.nanoTime();
-         if (did) {
-            next += TICK_NANOS;
-            long sleep = next - now;
-            if (sleep > 0L) {
-               LockSupport.parkNanos(sleep);
-            } else if (sleep < -MAX_TICK_LAG_NANOS) {
-               next = now;   // 落后太多就重新对表，不做追帧
-            }
-         } else {
-            next = now;
-            try {
-               Thread.sleep(WAIT_RETRY_MILLIS);
-            } catch (InterruptedException e) {
-               Thread.currentThread().interrupt();
-               return;
-            }
-         }
-      }
-   }
-
-   /** 把一段 UI/音频操作回迁到渲染线程执行——模拟线程碰 UI 必须先经此中转。 */
-   public void postUi(final Runnable r) {
-      Gdx.app.postRunnable(new Runnable() {
-         @Override
-         public void run() {
-            synchronized (Game.this.simLock) {
-               r.run();
-            }
-         }
-      });
-   }
-
-   /** 当前线程是不是渲染线程。UI 方法用它决定是否需要把工作回迁。 */
-   public static boolean isRenderThread() {
-      return Thread.currentThread() == renderThread;
-   }
-
-   /** 世界正在被替换（联机收世界/重同步），模拟线程在此期间必须停 tick。 */
-   private volatile boolean worldApplying;
-
-   /** 供其它线程（如网络线程的 runnable）在与模拟互斥的前提下读世界状态。 */
-   public void withSimLock(Runnable r) {
-      synchronized (this.simLock) {
-         r.run();
-      }
-   }
-
-   /** 清空所有结构的瞬态历史（滑动窗口、倒计时等）。主机发世界前调用，让序列化结果与客机全新加载一致。 */
-   public void clearTransientSimState() {
-      synchronized (layerLock) {
-         if (this.layers == null) {
-            return;
-         }
-
-         for (Layer l : this.layers) {
-            l.clearTransientState();
-         }
-      }
-   }
-
-   /**
-    * 把输入回调纳入 simLock。输入事件在 LwjglInput.processEvents() 里派发，那一步在
-    * listener.render() 之外，不在 update/draw 的锁范围内，所以必须单独包一层。
-    */
-   private void installLockedInput() {
-      final InputProcessor inner = Gdx.input.getInputProcessor();
-      if (inner == null) {
-         return;
-      }
-
-      Gdx.input.setInputProcessor(new InputProcessor() {
-         @Override
-         public boolean keyDown(int keycode) {
-            synchronized (Game.this.simLock) {
-               return inner.keyDown(keycode);
-            }
-         }
-
-         @Override
-         public boolean keyUp(int keycode) {
-            synchronized (Game.this.simLock) {
-               return inner.keyUp(keycode);
-            }
-         }
-
-         @Override
-         public boolean keyTyped(char character) {
-            synchronized (Game.this.simLock) {
-               return inner.keyTyped(character);
-            }
-         }
-
-         @Override
-         public boolean touchDown(int screenX, int screenY, int pointer, int button) {
-            synchronized (Game.this.simLock) {
-               return inner.touchDown(screenX, screenY, pointer, button);
-            }
-         }
-
-         @Override
-         public boolean touchUp(int screenX, int screenY, int pointer, int button) {
-            synchronized (Game.this.simLock) {
-               return inner.touchUp(screenX, screenY, pointer, button);
-            }
-         }
-
-         @Override
-         public boolean touchDragged(int screenX, int screenY, int pointer) {
-            synchronized (Game.this.simLock) {
-               return inner.touchDragged(screenX, screenY, pointer);
-            }
-         }
-
-         @Override
-         public boolean mouseMoved(int screenX, int screenY) {
-            synchronized (Game.this.simLock) {
-               return inner.mouseMoved(screenX, screenY);
-            }
-         }
-
-         @Override
-         public boolean scrolled(int amount) {
-            synchronized (Game.this.simLock) {
-               return inner.scrolled(amount);
-            }
-         }
-      });
    }
 
    protected void initParticles() {
@@ -629,12 +400,6 @@ public class Game extends GameScene {
    }
 
    public void reset() {
-      synchronized (this.simLock) {
-         this.resetLocked();
-      }
-   }
-
-   private void resetLocked() {
       this.ui.tileUI.hide();
       this.ui.tutorial.reset();
       this.resetActiveTile();
@@ -675,12 +440,6 @@ public class Game extends GameScene {
    }
 
    public void newGame() {
-      synchronized (this.simLock) {
-         this.newGameLocked();
-      }
-   }
-
-   private void newGameLocked() {
       this.currentGameName = null;
       this.setPaused(false);
       this.reset();
@@ -718,7 +477,6 @@ public class Game extends GameScene {
          Quarry.Q.prefs.putBoolean("tutorial", false).flush();
       }
 
-      SimRandom.G.setSeed(Generator.G.getSeed());
       Generator.G.generate(l0);
       this.cam.zoom = 1.0F;
       this.cam.position.set(((float)l0.width + 0.75F) * 64.0F / 2.0F, (float)(l0.height * 64 / 2), 0.0F);
@@ -760,316 +518,8 @@ public class Game extends GameScene {
       }
    }
 
-   /**
-    * 走一步模拟。固定步长 + 固定倍率调用，让模拟不再依赖渲染帧率，这是回放与联机同步可复现的前提。
-    * gameSpeed 保持「倍率」语义（一步里带上倍率），不是「多跑几步」，否则 100 倍速会变成每帧上千次 tick。
-    */
-   /**
-    * 换层。原本写在 draw() 里（渲染线程、时机不确定），但 layerIndex 会影响 stepSimulation
-    * （当前层跳过 postUpdate、并决定响度更新），所以必须放到 tick 边界执行，
-    * 保证所有端在同一 tick 换层。draw() 只负责画。
-    */
-   private void applyLayerChange() {
-      if (this.deltaLayer == 0) {
-         return;
-      }
-
-      synchronized (layerLock) {
-         int l = this.layerIndex + this.deltaLayer;
-         if (l >= 0 && l < this.layers.size) {
-            this.layerIndex += this.deltaLayer;
-            this.layer = this.layers.get(this.layerIndex);
-
-            for (Chunk c : this.layer.getChunks()) {
-               c.dirty = true;
-            }
-
-            if (!this.layer.pendingBounds.isEmpty()) {
-               this.layer.dirtyBounds.add(this.layer.pendingBounds);
-               this.layer.pendingBounds.clear();
-            }
-
-            if (this.activeStructure != null) {
-               this.camControl.updateTrail();
-               this.camControl.updateActiveElementPlaceable();
-            }
-
-            // 这个通知不能在模拟线程上发：Layer.onChangeEvent 会 dispose 自己（释放 GL mesh），
-            // LayerSelection 会改 Stage。两者都必须在渲染线程做，所以回迁。
-            final Layer changed = this.layer;
-            this.postUi(() -> this.layerChangeNotifier.notify(ChangeNotifier.Event.Type.CHANGE, changed));
-         }
-
-         this.deltaLayer = 0;
-      }
-   }
-
-   private void stepSimulation(double dt, int speed) {
-      this.applyLayerChange();
-      if (NetSession.isActive()) {
-         List<NetCommand> commands = NetSession.commandsFor(this.simTick);
-         if (commands != null) {
-            for (NetCommand command : commands) {
-               this.applyNetCommand(command);
-            }
-         }
-      }
-
-      this.powerGrid.update(dt, speed);
-      synchronized (layerLock) {
-         for (Layer l : this.layers) {
-            l.update(dt, speed);
-            if (l.getIndex() != this.layerIndex) {
-               l.postUpdate();
-            }
-         }
-      }
-
-      this.simTick++;
-      if (NetSession.isActive()) {
-         NetSession.onTickEnd(this.simTick);
-         if (NetSession.isAnchored() && this.simTick % NetSession.hashInterval() == 0L) {
-            NetSession.sendHash(this.simTick, this.simHash());
-            // 诊断：每次发哈希都打印子系统拆分，联机分叉时靠它定位（对两个窗口的日志即可看出）
-            System.out.println("[Net] debug " + this.simHashDebug());
-         }
-      }
-   }
-
-   /** 执行一条来自命令流的行为：两端在同一 tick、以同一顺序执行，所以结果一致。 */
-   private void applyNetCommand(NetCommand command) {
-      switch (command.type) {
-         case NetCommand.PAUSE: {
-            final boolean paused = command.p[0] == 1;
-            this.applyPause(paused);
-            // 模拟线程不能直接碰 Stage，回迁到渲染线程
-            this.postUi(() -> this.ui.pauseButton.setChecked(paused));
-            break;
-         }
-         case NetCommand.SPEED:
-            this.applySpeed(command.p[0]);
-            break;
-         case NetCommand.PLACE:
-            this.placeStructureFromCommand(command.p[0], command.p[1], command.p[2], command.p[3], command.p[4], command.p[5] == 1);
-            break;
-         case NetCommand.REMOVE:
-            this.removeStructureFromCommand(command.p[0], command.p[1], command.p[2], command.p[3] == 1);
-            break;
-         default:
-            break;
-      }
-   }
-
-   // ---------- 命令执行侧：世界修改只在这里发生，且不读任何 UI/预览态 ----------
-
-   /**
-    * 按类型 id 造一个建筑（不加入世界）。走 Structure.types 注册表 + 反射构造，与读档同一条路径。
-    * dirValue 的语义与发出方一致：IRotatable（传送带等）用它的 dir，其余建筑用 upDirection。
-    */
-   private Structure<?> createStructureFor(int typeId, int x, int y, int dirValue) {
-      StructureType type = Structure.types[typeId & 65535];
-      if (type == null) {
-         return null;
-      }
-
-      try {
-         Structure<?> s = (Structure<?>)type.constr.newInstance(x, y);
-         Direction dir = Direction.values[dirValue & 255];
-         if (s instanceof IRotatable) {
-            // 传送带这类建筑的朝向存在 dir 里（存档写的也是 dir），不是 upDirection
-            ((IRotatable)s).setRotation(dir);
-         } else {
-            s.setUpDirection(dir);
-         }
-
-         return s;
-      } catch (Exception var7) {
-         Quarry.Q.pi.message(1, var7);
-         return null;
-      }
-   }
-
-   /**
-    * 命令执行侧的可用性判定：只看 resources 与 buildCosts。
-    * 绝不能用 GameUi.canAffordStructure —— 它是 UI 派生值（还会按拖拽数量缩放），两端可能不同。
-    */
-   private boolean canAffordFor(Schema schema) {
-      for (Item.Items.Amount e : schema.buildCosts.entries) {
-         if (this.getResource(e.getItem()) < e.getAmount()) {
-            return false;
-         }
-      }
-
-      return true;
-   }
-
-   /**
-    * 扣资源的「模拟核心」：只改 resources 与各层 Storage 库存，去掉 UI 副作用，
-    * 并且**跳过调试用的 INCREASE_MODE**（命令执行必须在两端逐字面一致）。
-    */
-   private boolean removeResourcesCore(Item.ItemType item, int amount) {
-      if (amount <= 0) {
-         return true;
-      }
-
-      synchronized (resourceLock) {
-         Integer val = this.resources.get(item);
-         if (val == null) {
-            return false;
-         }
-
-         val = Math.max(0, val - amount);
-         this.resources.put(item, val);
-         this.resourceChangeNotifier.notify(ChangeNotifier.Event.Type.REMOVE, this.resourceChangePair.set(item, amount));
-         this.getSeenResources().add(item);
-         int remaining = amount;
-         synchronized (layerLock) {
-            for (Layer layer : this.layers) {
-               for (Chunk c : layer.getChunks()) {
-                  if (c != null && c.isInit()) {
-                     for (Structure<?> s : c.getStructures()) {
-                        if (s instanceof StorageStructure) {
-                           remaining = ((StorageStructure)s).removeFromInventoryWithRest(item, remaining);
-                           if (remaining == 0) {
-                              break;
-                           }
-                        }
-                     }
-                  }
-               }
-            }
-         }
-
-         return remaining <= 0;
-      }
-   }
-
-   /** 退资源的「模拟核心」：只改 resources 与退款仓库，去掉 toast。 */
-   private void addResourcesCore(Item.ItemType item, int amount) {
-      if (amount <= 0) {
-         return;
-      }
-
-      synchronized (resourceLock) {
-         int remaining = amount;
-         synchronized (layerLock) {
-            label60:
-            for (Layer layer : this.layerIter) {
-               for (StorageStructure b : layer.storages) {
-                  if (b.isRefundStorage() && (b.getSchema().type != StructureType.Barrel || !b.isEmpty())) {
-                     remaining = b.addToInventoryWithRest(item, remaining);
-                     if (remaining == 0) {
-                        break label60;
-                     }
-                  }
-               }
-            }
-
-            if (remaining > 0) {
-               amount -= remaining;
-            }
-         }
-
-         Integer val = this.resources.get(item);
-         if (val == null) {
-            val = 0;
-         }
-
-         this.resources.put(item, val + amount);
-         this.resourceChangeNotifier.notify(ChangeNotifier.Event.Type.ADD, this.resourceChangePair.set(item, amount));
-         this.getSeenResources().add(item);
-      }
-   }
-
-   /**
-    * 放置命令：自校验（资源 + 层内占用）后落到目标层。两端跑同一段代码，所以结果一致。
-    * 占用判定直接复用 Layer.addStructure（内部已含越界与 footprint 重叠检查）。
-    */
-   public boolean placeStructureFromCommand(int layerIndex, int x, int y, int typeId, int upDir, boolean free) {
-      Layer target = this.getLayer(layerIndex);
-      if (target == null) {
-         System.out.println("[Net] PLACE 失败: 层 " + layerIndex + " 不存在");
-         return false;
-      }
-
-      Structure<?> s = this.createStructureFor(typeId, x, y, upDir);
-      if (s == null) {
-         System.out.println("[Net] PLACE 失败: 无法构造 typeId=" + typeId);
-         return false;
-      }
-
-      if (!free && !this.canAffordFor(s.getSchema())) {
-         System.out.println("[Net] PLACE 失败: 资源不足 " + s.getSchema().type.name + " @" + x + "," + y);
-
-         for (Item.Items.Amount e : s.getSchema().buildCosts.entries) {
-            System.out.println("[Net]    需要 " + e.getItem() + " x" + e.getAmount() + "，现有 " + this.getResource(e.getItem()));
-         }
-
-         return false;
-      }
-
-      if (!target.addStructure(s)) {
-         System.out.println(
-            "[Net] PLACE 失败: 位置不可用 " + s.getSchema().type.name + " @" + x + "," + y + "（越界或已被占用）"
-         );
-         return false;
-      }
-
-      if (!free) {
-         for (Item.Items.Amount e : s.getSchema().buildCosts.entries) {
-            this.removeResourcesCore(e.getItem(), e.getAmount());
-         }
-      }
-
-      return true;
-   }
-
-   /** 拆除命令：与 deleteStructure 的退料规则一致，但不带音效/UI 副作用。 */
-   public boolean removeStructureFromCommand(int layerIndex, int x, int y, boolean cable) {
-      Layer target = this.getLayer(layerIndex);
-      if (target == null) {
-         return false;
-      }
-
-      Structure<?> s = cable ? target.getCable(x, y) : target.getStructure(x, y);
-      if (s == null || s.getSchema().has(Schema.Flags.Indestructible)) {
-         return false;
-      }
-
-      if (cable) {
-         target.removeCable((CopperCable)s);
-      } else {
-         target.removeStructure(s);
-      }
-
-      int removedHoppers = target.removeAttachedHoppers(s);
-      float factor = this.hasScience(Science.ScienceType.ConsiderateConstruction) ? 0.8F : 0.25F;
-
-      for (Item.Items.Amount e : s.getSchema().buildCosts.entries) {
-         if (e.getAmount() > 1) {
-            this.addResourcesCore(e.getItem(), (int)Math.ceil((double)((float)e.getAmount() * factor)));
-         }
-      }
-
-      for (Item.Items.Amount e : Hopper.classSchema.buildCosts.entries) {
-         if (e.getAmount() > 1) {
-            this.addResourcesCore(e.getItem(), (int)Math.ceil((double)((float)(e.getAmount() * removedHoppers) * factor)));
-         }
-      }
-
-      return true;
-   }
-
    @Override
    public void update(double deltaTime) {
-      renderThread = Thread.currentThread();
-      synchronized (this.simLock) {
-         this.updateLocked(deltaTime);
-      }
-   }
-
-   /** update 的本体。必须在 simLock 内调用（读世界状态、改相机/UI）。 */
-   private void updateLocked(double deltaTime) {
       if (this.startNewGame) {
          this.newGame();
          this.startNewGame = false;
@@ -1160,7 +610,29 @@ public class Game extends GameScene {
          }
 
          this.camControl.update();
-         // 模拟推进已交给 simLoop()（独立线程）。这里只剩渲染侧的工作：相机、UI、音频。
+         if (SINGLE_FRAME) {
+            this.powerGrid.update(deltaTime, this.gameSpeed);
+            synchronized (layerLock) {
+               for (Layer l : this.layers) {
+                  l.update(deltaTime, this.gameSpeed);
+                  if (l.getIndex() != this.layerIndex) {
+                     l.postUpdate();
+                  }
+               }
+            }
+
+            SINGLE_FRAME = false;
+         } else {
+            this.powerGrid.update(deltaTime, this.gamePaused ? 0 : this.gameSpeed);
+            synchronized (layerLock) {
+               for (Layer lx : this.layers) {
+                  lx.update(deltaTime, this.gamePaused ? 0 : this.gameSpeed);
+                  if (lx.getIndex() != this.layerIndex) {
+                     lx.postUpdate();
+                  }
+               }
+            }
+         }
 
          this.ui.update(deltaTime);
          this.spatializer.setCenter(this.cam.position.x, this.cam.position.y, this.cam.zoom / 0.5F);
@@ -1257,13 +729,6 @@ public class Game extends GameScene {
 
    @Override
    public void draw() {
-      synchronized (this.simLock) {
-         this.drawLocked();
-      }
-   }
-
-   /** draw 的本体。必须在 simLock 内调用（要读世界状态画图）。 */
-   private void drawLocked() {
       if (this.layer != null) {
          Gdx.gl.glClear(16640);
          if (this.saveMap) {
@@ -1869,6 +1334,34 @@ public class Game extends GameScene {
          }
 
          this.ui.draw();
+         if (this.deltaLayer != 0) {
+            synchronized (layerLock) {
+               int l = this.layerIndex + this.deltaLayer;
+               if (l >= 0 && l < this.layers.size) {
+                  this.layerIndex = this.layerIndex + this.deltaLayer;
+                  this.layer = (Layer)this.layers.get(this.layerIndex);
+
+                  for (Chunk c : this.layer.getChunks()) {
+                     c.dirty = true;
+                  }
+
+                  if (!this.layer.pendingBounds.isEmpty()) {
+                     this.layer.dirtyBounds.add(this.layer.pendingBounds);
+                     this.layer.pendingBounds.clear();
+                  }
+
+                  if (this.activeStructure != null) {
+                     this.camControl.updateTrail();
+                     this.camControl.updateActiveElementPlaceable();
+                  }
+
+                  this.layerChangeNotifier.notify(ChangeNotifier.Event.Type.CHANGE, this.layer);
+               }
+
+               this.deltaLayer = 0;
+            }
+         }
+
          synchronized (renderThreadLock) {
             if (this.renderThreadTasks.size > 0) {
                ((Runnable)this.renderThreadTasks.removeIndex(0)).run();
@@ -2171,8 +1664,7 @@ public class Game extends GameScene {
             this.resources.put(item, val);
             this.resourceChangeNotifier.notify(ChangeNotifier.Event.Type.ADD, this.resourceChangePair.set(item, amount));
             this.getSeenResources().add(item);
-            // 可能来自模拟线程（生产），只能置脏标记
-            this.ui.markResourcesDirty();
+            this.ui.updateResources(true);
             if (this.activeStructure != null) {
                this.camControl.updateActiveElementPlaceable();
             }
@@ -2222,7 +1714,7 @@ public class Game extends GameScene {
                   }
                }
 
-               this.ui.markResourcesDirty();
+               this.ui.updateResources(true);
                if (this.activeStructure != null) {
                   this.camControl.updateActiveElementPlaceable();
                }
@@ -2243,7 +1735,7 @@ public class Game extends GameScene {
    public synchronized void addSeenResource(Item.ItemType item) {
       synchronized (resourceLock) {
          if (this.getSeenResources().add(item)) {
-            this.ui.markResourcesDirty();
+            this.ui.updateResources(true);
          }
       }
    }
@@ -2389,14 +1881,6 @@ public class Game extends GameScene {
          save = Quarry.Q.i18n.get("ui.unnamed_save");
       }
 
-      // 序列化会读整个世界状态、并用共享的 NBT 缓冲，必须与模拟线程互斥。
-      // 本方法跑在 Quarry.threadPool 上（见 draw 里的 autosave/thumbnail 分支）。
-      synchronized (this.simLock) {
-         this.saveDataLocked(save, isAutosave, saveMap);
-      }
-   }
-
-   private void saveDataLocked(String save, boolean isAutosave, boolean saveMap) {
       try {
          NBT.Builder metaBuilder = new NBT.Builder("Meta");
          this.playTime = this.getPlayTime();
@@ -2425,8 +1909,61 @@ public class Game extends GameScene {
 
          NBT.write(fh.write(false), meta, NBT.CompressionType.Fast);
          meta.free();
-         NBT.CompoundTag data = this.buildSaveTag(save);
-         System.out.println("[SimHash] save=" + saveName + " tick=" + this.simTick + " hash=" + Long.toHexString(this.simHash()));
+         NBT.Builder builder = new NBT.Builder("Save");
+         builder.Byte("version", (byte)23)
+            .Int("build", Quarry.Q.versionNumber)
+            .Byte("full", (byte)(Quarry.Q.fullVersion ? 1 : 0))
+            .Long("playTime", this.playTime)
+            .String("name", save)
+            .Short("layer", (short)this.layerIndex)
+            .Byte("infinite", (byte)(this.infinite ? 1 : 0))
+            .Long("seed", Generator.G.getSeed())
+            .LongArray("rng", Generator.G.getState())
+            .List("Map", NBT.TagType.Compound);
+         synchronized (layerLock) {
+            for (Layer l : this.layers) {
+               l.save(builder);
+            }
+         }
+
+         builder.End().Compound("Resources");
+         synchronized (resourceLock) {
+            Array<Short> seen = new Array();
+
+            for (Item.ItemType seenResource : this.getSeenResources()) {
+               seen.add(seenResource.value);
+            }
+
+            short[] s = new short[seen.size];
+            int i = 0;
+
+            for (Short q : seen) {
+               s[i++] = q;
+            }
+
+            Util.NBTwriteInventory(builder, this.resources);
+            builder.ShortArray("Seen", s);
+         }
+
+         builder.End();
+         if (this.sciences.size() > 0) {
+            byte[] science = new byte[this.sciences.size()];
+            int i = 0;
+
+            for (Science.ScienceType s : this.sciences) {
+               science[i++] = s.id;
+            }
+
+            builder.ByteArray("Sciences", science);
+         }
+
+         builder.Compound("camera")
+            .Float("x", this.cam.position.x)
+            .Float("y", this.cam.position.y)
+            .Float("z", this.cam.position.z)
+            .Float("zoom", this.cam.zoom)
+            .End();
+         NBT.CompoundTag data = builder.Get();
          FileHandle fh1 = Quarry.Q.file("TheQuarry/saves/" + file + ".qsf", true);
          if (fh1.exists()) {
             fh1.copyTo(Quarry.Q.file("TheQuarry/saves/" + file + "-old.qsf", true));
@@ -2439,233 +1976,14 @@ public class Game extends GameScene {
 
          saveThumbnailCache.remove(file);
          data.free();
-         this.postUi(() -> this.ui.toast.show(Quarry.Q.i18n.get("toast.game_saved")));
+         this.ui.toast.show(Quarry.Q.i18n.get("toast.game_saved"));
          if (this.saveCallback != null) {
             this.saveCallback.call(null);
             this.saveCallback = null;
          }
-         } catch (Exception var19) {
-            Quarry.Q.pi.message(1, var19);
-            this.postUi(() -> this.ui.toast.show(Quarry.Q.i18n.get("toast.save_error")));
-         }
-   }
-
-   /**
-    * 把当前世界拼成一个 NBT tag（内容与存盘完全一致，但不落盘）。联机重同步时直接序列化到内存传输，
-    * 也可以拿它做「序列化 → 解析 → 应用」的内存 round-trip 自检。调用方负责 free()。
-    */
-   public NBT.CompoundTag buildSaveTag(String save) {
-      NBT.Builder builder = new NBT.Builder("Save");
-      builder.Byte("version", (byte)23)
-         .Int("build", Quarry.Q.versionNumber)
-         .Byte("full", (byte)(Quarry.Q.fullVersion ? 1 : 0))
-         .Long("playTime", this.playTime)
-         .String("name", save)
-         .Short("layer", (short)this.layerIndex)
-         .Byte("infinite", (byte)(this.infinite ? 1 : 0))
-         .Long("seed", Generator.G.getSeed())
-         .LongArray("rng", Generator.G.getState())
-         .LongArray("simrng", SimRandom.G.getState())
-         .List("Map", NBT.TagType.Compound);
-      synchronized (layerLock) {
-         for (Layer l : this.layers) {
-            l.save(builder);
-         }
-      }
-
-      builder.End().Compound("Resources");
-      synchronized (resourceLock) {
-         Array<Short> seen = new Array();
-
-         for (Item.ItemType seenResource : this.getSeenResources()) {
-            seen.add(seenResource.value);
-         }
-
-         short[] s = new short[seen.size];
-         int i = 0;
-
-         for (Short q : seen) {
-            s[i++] = q;
-         }
-
-         Util.NBTwriteInventory(builder, this.resources);
-         builder.ShortArray("Seen", s);
-      }
-
-      builder.End();
-      if (this.sciences.size() > 0) {
-         byte[] science = new byte[this.sciences.size()];
-         int i = 0;
-
-         for (Science.ScienceType s : this.sciences) {
-            science[i++] = s.id;
-         }
-
-         builder.ByteArray("Sciences", science);
-      }
-
-      builder.Compound("camera")
-         .Float("x", this.cam.position.x)
-         .Float("y", this.cam.position.y)
-         .Float("z", this.cam.position.z)
-         .Float("zoom", this.cam.zoom)
-         .End();
-      return builder.Get();
-   }
-
-   /**
-    * 把当前世界序列化成一段字节（NBT + LZ4），联机时发给加入方。必须在渲染线程调用。
-    */
-   public byte[] serializeWorld() throws IOException {
-      NBT.CompoundTag tag = this.buildSaveTag(this.currentGameName == null ? "net" : this.currentGameName);
-      ByteArrayOutputStream baos = new ByteArrayOutputStream();
-      NBT.write(baos, tag, NBT.CompressionType.Fast);
-      tag.free();
-      return baos.toByteArray();
-   }
-
-   /**
-    * 计算一段世界字节的哈希：只解析 + 遍历 NBT，不应用、不碰模拟状态（可在网络线程调用）。
-    * 主机发送前与客户端收到后都用它，两边数字相等即说明「世界传输是忠实的」，
-    * 和 simHash（含 simTick 与本地输入）不一致是两回事。
-    */
-   public long worldBytesHash(byte[] bytes) {
-      try {
-         NBT.CompoundTag tag = NBT.read(new ByteArrayInputStream(bytes), NBT.CompressionType.Fast);
-         SimHash h = new SimHash();
-         h.hashTag(tag);
-         tag.free();
-         return h.value();
-      } catch (Exception var3) {
-         Quarry.Q.pi.message(1, var3);
-         return 0L;
-      }
-   }
-
-   /**
-    * 用主机发来的世界字节替换当前世界（加入方调用）。必须在渲染线程调用。
-    * 注意：不推进 simTick，M1c 做锁步时会由主机把 tick 一起带过来。
-    */
-   public void applyWorldBytes(byte[] bytes, long tick, boolean paused, int speed) {
-      // 由 NetSession 的 postRunnable 触发（渲染线程，但在 render() 之外），必须自己加锁。
-      // worldApplying 挡住模拟线程：layers 是在下面的延迟 runnable 里才换上的，
-      // 在那之前模拟线程会拿着"旧世界 + 新 tick 编号"跑，两端必然分叉。
-      this.worldApplying = true;
-      synchronized (this.simLock) {
-         this.applyWorldBytesLocked(bytes, tick, paused, speed);
-      }
-   }
-
-   private void applyWorldBytesLocked(byte[] bytes, long tick, boolean paused, int speed) {
-      try {
-         NBT.CompoundTag data = this.loadSaveData(new ByteArrayInputStream(bytes));
-         NBT.CompoundTag meta = new NBT.Builder("Meta")
-            .Int("build", Quarry.Q.versionNumber)
-            .Long("playTime", this.playTime)
-            .Long("seed", Generator.G.getSeed())
-            .String("name", "net")
-            .Get();
-         Vector3 camBefore = this.cam.position.cpy();
-         float zoomBefore = this.cam.zoom;
-         final int layerBefore = this.layerIndex;
-         this.reset();
-         this.applySaveTag(meta, data, new Callback<Object>() {
-            public void call(Object d) {
-               if (d != null && d != Boolean.TRUE) {
-                  Quarry.Q.pi.message(1, d instanceof Throwable ? (Throwable)d : new RuntimeException(String.valueOf(d)));
-               }
-            }
-         }, Quarry.Q.versionNumber);
-         meta.free();
-         // 相机是每个玩家自己的视角：存档里带了主机的相机，applySaveTag 会顺手应用它，
-         // 那样一重同步（甚至只是加入）客户端的视角就被主机"抢"走了。这里恢复本机视角。
-         this.cam.position.set(camBefore);
-         this.cam.zoom = zoomBefore;
-         this.cam.update();
-         this.simTick = tick;
-         // 当前所在层同样是"每个玩家自己的视角"：存档里带的是主机的层，applySaveTag 会切过去，
-         // 这里在它的换层 runnable 之后排队恢复本机的层（FIFO，所以能看到新 layers）
-         // 当前所在层同样是"每个玩家自己的视角"：存档里带的是主机的层，applySaveTag 会切过去，
-         // 这里在它的换层 runnable 之后排队恢复本机的层（FIFO，所以能看到新 layers）。
-         // 走 postUi 是为了在 simLock 内改 layerIndex/layer（模拟线程会读它们）。
-         // 它排在 applySaveTag 的换层 runnable 之后，是最后一个，所以在这里解除 worldApplying。
-         this.postUi(new Runnable() {
-            @Override
-            public void run() {
-               if (Game.this.layers != null && layerBefore >= 0 && layerBefore < Game.this.layers.size) {
-                  Game.this.layerIndex = layerBefore;
-                  Game.this.layer = Game.this.layers.get(layerBefore);
-                  Game.this.layerChangeNotifier.notify(ChangeNotifier.Event.Type.CHANGE, Game.this.layer);
-               }
-
-               // 客机加载时某些 loadData 会把瞬态门闩置 true（如 Conveyor.loadData 的 itemChanges），
-               // 而主机在发世界前已清成 false —— 这里同步清掉，保证两端起点一致。
-               Game.this.clearTransientSimState();
-               Game.this.worldApplying = false;
-            }
-         });
-         // 暂停/倍速跟随主机（世界 tag 里不带这两个值），且必须立刻生效，
-         // 否则命令生效前的那几 tick 两端速度不同，会被判定为漂移
-         this.applyPause(paused);
-         this.applySpeed(speed);
-         this.ui.pauseButton.setChecked(paused);
-         // 与主机从同一 tick 起步；起点之前的对端命令包豁免等待（那时对端还不存在）
-         NetSession.markStartTick(tick);
-         try {
-            System.out.println("[Net] world applied, tick=" + this.simTick + " hash=" + Long.toHexString(this.simHash()));
-         } catch (Exception var5) {
-            Quarry.Q.pi.message(1, var5);
-         }
-      } catch (Exception var4) {
-         Quarry.Q.pi.message(1, var4);
-         System.out.println("[Net] 应用世界失败：" + var4);
-         // 失败也要解除 worldApplying：否则它一直为 true，模拟线程永久停 tick
-         this.worldApplying = false;
-      }
-   }
-
-   /**
-    * 内存 round-trip 自检：存档 → 序列化到内存 → 解析回来 → 应用 → 比对 simHash。
-    * 不需要存档文件，也不需要第二台机器，按 F11 触发。前后的哈希必须相等。
-    */
-   public void roundTripSelfCheck() {
-      final long before = this.simHash();
-
-      try {
-         final byte[] bytes = this.serializeWorld();
-         NBT.CompoundTag meta = new NBT.Builder("Meta")
-            .Int("build", Quarry.Q.versionNumber)
-            .Long("playTime", this.playTime)
-            .Long("seed", Generator.G.getSeed())
-            .String("name", "selfcheck")
-            .Get();
-         NBT.CompoundTag parsed = NBT.read(new ByteArrayInputStream(bytes), NBT.CompressionType.Fast);
-         this.applySaveTag(meta, parsed, new Callback<Object>() {
-            public void call(Object data) {
-               if (data != null && data != Boolean.TRUE) {
-                  Quarry.Q.pi.message(1, data instanceof Throwable ? (Throwable)data : new RuntimeException(String.valueOf(data)));
-               }
-            }
-         }, Quarry.Q.versionNumber);
-         meta.free();
-         // applySaveTag 内部用 Gdx.app.postRunnable 换层，所以对比必须在它之后排队（FIFO）
-         Gdx.app.postRunnable(new Runnable() {
-            @Override
-            public void run() {
-               long after = Game.this.simHash();
-               System.out.println(
-                  "[SimHash] roundtrip bytes="
-                     + bytes.length
-                     + " before="
-                     + Long.toHexString(before)
-                     + " after="
-                     + Long.toHexString(after)
-                     + (before == after ? " OK" : " MISMATCH")
-               );
-            }
-         });
-      } catch (Exception var8) {
-         Quarry.Q.pi.message(1, var8);
+      } catch (Exception var19) {
+         Quarry.Q.pi.message(1, var19);
+         this.ui.toast.show(Quarry.Q.i18n.get("toast.save_error"));
       }
    }
 
@@ -2728,18 +2046,11 @@ public class Game extends GameScene {
       if (!Quarry.Q.file("TheQuarry/saves/" + filename + ".qsf", false).exists()) {
          throw new FileNotFoundException();
       } else {
-         return this.loadSaveData(Quarry.Q.file("TheQuarry/saves/" + filename + ".qsf", false).read());
+         long t = System.currentTimeMillis();
+         NBT.CompoundTag data = NBT.read(new BufferedInputStream(Quarry.Q.file("TheQuarry/saves/" + filename + ".qsf", false).read()), NBT.CompressionType.Fast);
+         System.out.println("NBT loading took " + (System.currentTimeMillis() - t));
+         return data;
       }
-   }
-
-   /**
-    * 从任意输入流读一份存档 tag（不落盘也能重同步）。压缩类型与文件版一致。
-    */
-   public NBT.CompoundTag loadSaveData(InputStream in) throws IOException {
-      long t = System.currentTimeMillis();
-      NBT.CompoundTag data = NBT.read(new BufferedInputStream(in), NBT.CompressionType.Fast);
-      System.out.println("NBT loading took " + (System.currentTimeMillis() - t));
-      return data;
    }
 
    public void load(final String filename, final Callback<Object> callback) {
@@ -2826,23 +2137,10 @@ public class Game extends GameScene {
             return;
          }
 
-         this.applySaveTag(meta, data, callback, build);
-      } catch (Exception var22) {
-         callback.call(var22);
-      }
-   }
-
-   /**
-    * 应用一份已解析的存档 tag：与文件读档的区别只是不碰文件，联机重同步时把对端发来的世界字节
-    * 解析后直接灌进来。本方法内部会 free 掉 data；若要完全重同步，调用方先自己 reset()。
-    * 注意换层是通过 Gdx.app.postRunnable 延后到下一帧执行的。
-    */
-   public void applySaveTag(NBT.CompoundTag meta, NBT.CompoundTag data, Callback<Object> callback, final int build) {
-      try {
          long t0 = System.currentTimeMillis();
-      if (build < Quarry.Q.versionNumber) {
-         LoadingCompat.instance.upgrade(data, build);
-      }
+         if (build < Quarry.Q.versionNumber) {
+            LoadingCompat.instance.upgrade(data, build);
+         }
 
          this.currentGameName = meta.String("name");
          this.playTime = meta.Long("playTime", 0L);
@@ -2851,11 +2149,6 @@ public class Game extends GameScene {
          Generator.G.setSeed(data.Long("seed", 0L));
          if (data.has("rng")) {
             Generator.G.setState(data.LongArray("rng"));
-         }
-
-         SimRandom.G.setSeed(Generator.G.getSeed());
-         if (data.has("simrng")) {
-            SimRandom.G.setState(data.LongArray("simrng"));
          }
 
          try {
@@ -3090,7 +2383,6 @@ public class Game extends GameScene {
 
    @Override
    public void dispose() {
-      this.stopSimThread();
       for (FrameBuffer fbo : this.chunkFBOs) {
          if (fbo != null) {
             fbo.dispose();
@@ -3317,32 +2609,6 @@ public class Game extends GameScene {
             break;
          case 247:
             SMOOTH_CAMERA = !SMOOTH_CAMERA;
-            break;
-         case 250:
-            NetSession.disconnect();
-            return true;
-         case 251:
-            NetSession.host(NetSession.DEFAULT_PORT);
-            return true;
-         case 252:
-            this.ui.prompt.show(this.ui, "联机加入：输入 ip[:端口]", "127.0.0.1:" + NetSession.DEFAULT_PORT, new Response<String, Boolean>() {
-               public Boolean call(String data) {
-                  NetSession.join(data);
-                  return true;
-               }
-            });
-            return true;
-         case 253:
-            LOCKSTEP = !LOCKSTEP;
-            Quarry.Q.prefs.putBoolean("lockstep", LOCKSTEP).flush();
-            System.out.println("[Lockstep] " + LOCKSTEP);
-            return true;
-         case 254:
-            this.roundTripSelfCheck();
-            return true;
-         case 255:
-            System.out.println("[SimHash] tick=" + this.simTick + " hash=" + Long.toHexString(this.simHash()));
-            return true;
       }
 
       return false;
@@ -3401,19 +2667,6 @@ public class Game extends GameScene {
    }
 
    public void setPaused(boolean value) {
-      if (NetSession.isActive()) {
-         // 联机：暂停由主机裁决，且要等 tick 边界两端同时生效（否则两边 tick 流会分叉）
-         if (NetSession.isHost() && value != this.gamePaused) {
-            NetSession.issue(NetCommand.pause(value));
-         }
-
-         return;
-      }
-
-      this.gamePaused = value;
-   }
-
-   private void applyPause(boolean value) {
       this.gamePaused = value;
    }
 
@@ -3422,36 +2675,12 @@ public class Game extends GameScene {
       this.gameSpeed = 1;
    }
 
-   public int getGameSpeed() {
-      return this.gameSpeed;
-   }
-
    public void resetSpeed() {
-      if (NetSession.isActive()) {
-         if (NetSession.isHost()) {
-            NetSession.issue(NetCommand.speed(1));
-         }
-
-         return;
-      }
-
       this.gameSpeed = 1;
    }
 
    public void increaseSpeed() {
-      if (NetSession.isActive()) {
-         if (NetSession.isHost()) {
-            NetSession.issue(NetCommand.speed(Math.min(this.gameSpeed * 2, 100)));
-         }
-
-         return;
-      }
-
       this.gameSpeed = Math.min(this.gameSpeed * 2, 100);
-   }
-
-   private void applySpeed(int speed) {
-      this.gameSpeed = speed;
    }
 
    public int getItemCount() {
@@ -3489,147 +2718,6 @@ public class Game extends GameScene {
 
    public int getLayerCount() {
       return this.layers.size;
-   }
-
-   /**
-    * 世界状态哈希：把会进存档的模拟状态压成一个 64 位值。
-    * 同一存档 / 同一 simTick 必须得到相同结果——用来验证确定性（同种子同 tick 应一致、读档后应稳定），
-    * 也是将来联机快照比对的雏形。按 F12 打印，存档时也会打一条。
-    *
-    * 注意：内部会把每层重新序列化成 NBT，工厂很大时有几十毫秒开销，只在调试时调用。
-    */
-   public long simHash() {
-      SimHash h = new SimHash();
-      h.put(this.simTick);
-      h.put(this.infinite);
-      h.put(Generator.G.getSeed());
-      h.put(Generator.G.getState());
-      h.put(SimRandom.G.getState());
-      synchronized (layerLock) {
-         h.put(this.layers.size);
-         // 注意：Layer.save 写出的是「无名 compound」，只能挂进 List（存档路径就是这么用的），
-         // 直接挂到 compound 下会被 NBT 拒绝（Compound Tag expects named tags）。
-         NBT.Builder b = new NBT.Builder("Hash");
-         b.List("Map", NBT.TagType.Compound);
-
-         for (Layer l : this.layers) {
-            l.save(b);
-         }
-
-         b.End();
-         h.hashTag(b.Get());
-      }
-
-      for (Item.ItemType t : Item.ItemType.values) {
-         h.put(t.ordinal());
-         h.put(this.getResource(t));
-      }
-
-      for (Item.ItemType t : Item.ItemType.values) {
-         h.put(t.ordinal());
-         h.put(this.seenResources.contains(t));
-      }
-
-      for (Science.ScienceType s : Science.ScienceType.values) {
-         h.put(s.ordinal());
-         h.put(this.sciences.contains(s));
-      }
-
-      return h.value();
-   }
-
-   /**
-    * 诊断用：把 simHash 拆成各子系统的哈希，联机分叉时打印，用来定位到底哪部分不一致。
-    */
-   public String simHashDebug() {
-      StringBuilder sb = new StringBuilder();
-      sb.append("tick=").append(this.simTick).append(" infinite=").append(this.infinite);
-
-      SimHash rng = new SimHash();
-      rng.put(Generator.G.getSeed());
-      rng.put(Generator.G.getState());
-      rng.put(SimRandom.G.getState());
-      sb.append(" rng=").append(Long.toHexString(rng.value()));
-
-      synchronized (layerLock) {
-         sb.append(" layers=").append(this.layers.size);
-
-         for (int i = 0; i < this.layers.size; i++) {
-            Layer l = this.layers.get(i);
-            NBT.Builder b = new NBT.Builder("L");
-            b.List("Map", NBT.TagType.Compound);
-            l.save(b);
-            b.End();
-            SimHash lh = new SimHash();
-            lh.hashTag(b.Get());
-            sb.append(" L").append(i).append("=").append(Long.toHexString(lh.value()));
-
-            // 逐 chunk 哈希，用于进一步定位到具体哪一块（瓦片 + 结构）
-            sb.append(" chunks=[");
-            Chunk[] cs = l.getChunks();
-
-            for (int ci = 0; ci < cs.length; ci++) {
-               NBT.Builder cb = new NBT.Builder("C");
-               cb.List("Map", NBT.TagType.Compound);
-               cs[ci].save(cb);
-               cb.End();
-               SimHash cch = new SimHash();
-               cch.hashTag(cb.Get());
-
-               if (ci > 0) {
-                  sb.append(' ');
-               }
-
-               sb.append(ci).append(':').append(Long.toHexString(cch.value()));
-
-               // 逐结构哈希：定位到具体是哪个结构分叉
-               Structure<?>[] ss = (Structure<?>[])cs[ci].getStructures().items;
-
-               for (int si = 0; si < ss.length; si++) {
-                  Structure<?> s = ss[si];
-                  if (s == null) {
-                     break;
-                  }
-
-                  NBT.Builder sbb = new NBT.Builder("S");
-                  sbb.List("Map", NBT.TagType.Compound);
-                  s.save(sbb);
-                  sbb.End();
-                  SimHash srh = new SimHash();
-                  srh.hashTag(sbb.Get());
-                  sb.append(' ').append(s.getSchema().type.name).append('@').append(s.x).append(',').append(s.y).append('=').append(Long.toHexString(srh.value()));
-               }
-            }
-
-            sb.append(']');
-         }
-      }
-
-      SimHash res = new SimHash();
-
-      for (Item.ItemType t : Item.ItemType.values) {
-         res.put(t.ordinal());
-         res.put(this.getResource(t));
-      }
-
-      sb.append(" res=").append(Long.toHexString(res.value()));
-      SimHash seen = new SimHash();
-
-      for (Item.ItemType t : Item.ItemType.values) {
-         seen.put(t.ordinal());
-         seen.put(this.seenResources.contains(t));
-      }
-
-      sb.append(" seen=").append(Long.toHexString(seen.value()));
-      SimHash sci = new SimHash();
-
-      for (Science.ScienceType s : Science.ScienceType.values) {
-         sci.put(s.ordinal());
-         sci.put(this.sciences.contains(s));
-      }
-
-      sb.append(" sci=").append(Long.toHexString(sci.value()));
-      return sb.toString();
    }
 
    public Layer getLayer(int index) {
@@ -3783,12 +2871,6 @@ public class Game extends GameScene {
       }
 
       public void deleteStructure(Structure<?> s) {
-         if (NetSession.isActive()) {
-            // 联机：本地不改世界，改成命令；退料也在命令执行侧按同样规则算
-            NetSession.issue(NetCommand.remove(s.layer != null ? s.layer.getIndex() : Game.this.layer.getIndex(), s.x, s.y, s instanceof CopperCable));
-            return;
-         }
-
          if (s instanceof CopperCable) {
             Game.this.layer.removeCable((CopperCable)s);
          } else {
@@ -4796,7 +3878,6 @@ public class Game extends GameScene {
             }
 
             if (Game.this.activeStructure instanceof Conveyor
-               && !NetSession.isActive()
                && !Game.this.activeStructureTrail.containsKey((int)(Game.this.endA.x * (float)Game.this.layer.height + Game.this.endA.y))
                && Game.this.activeStructurePath.size() > 0) {
                Structure<?> s = Game.this.layer.getStructure((int)Game.this.endA.x, (int)Game.this.endA.y);
@@ -4817,7 +3898,6 @@ public class Game extends GameScene {
             }
 
             if (Game.this.activeStructure instanceof Conveyor
-               && !NetSession.isActive()
                && Game.this.activeStructureTrail.containsKey((int)(Game.this.endA.x * (float)Game.this.layer.height + Game.this.endA.y))) {
                for (Direction d : Direction.values) {
                   if (!Game.this.activeStructureTrail
@@ -4841,10 +3921,6 @@ public class Game extends GameScene {
             Game.this.ui.updateTooltipResources();
             this.placingTrail = false;
          } else if (Game.this.pasteMode) {
-            if (NetSession.isActive()) {
-               // 蓝图粘贴带额外 NBT（Components/pasteData），M1d 暂不支持，联机时禁用入口
-               Game.this.ui.toast.show("联机时暂不支持蓝图粘贴");
-            } else {
             Array<Pair<Structure<?>, NBT.CompoundTag>> pairs = new Array();
 
             for (Pair<Structure<?>, NBT.CompoundTag> p : Game.this.copyStructures.values()) {
@@ -4863,9 +3939,8 @@ public class Game extends GameScene {
             for (Pair<Structure<?>, NBT.CompoundTag> s : pairs) {
                s.getKey().paste(Game.this.copyRegion, s.getVal());
             }
-            }
          } else {
-            if (Game.this.activeStructure instanceof Conveyor && !NetSession.isActive()) {
+            if (Game.this.activeStructure instanceof Conveyor) {
                for (Direction dx : Direction.values) {
                   Structure<?> q = Game.this.layer.getStructure(Game.this.activeStructure.x + dx.dx, Game.this.activeStructure.y + dx.dy);
                   if (q != null && q.getSchema().type == StructureType.Conveyor && ((Conveyor)q).getStructureInDirection(((Conveyor)q).getDirection()) == null) {
@@ -4875,7 +3950,7 @@ public class Game extends GameScene {
                }
             }
 
-            if (Game.this.activeStructure instanceof ConveyorBridge && !NetSession.isActive()) {
+            if (Game.this.activeStructure instanceof ConveyorBridge) {
                Structure<?> x = Game.this.layer.getStructure(Game.this.activeStructure.x, Game.this.activeStructure.y);
                if (x != null && x.getSchema().type == StructureType.Conveyor) {
                   Game.this.layer.removeStructure(x);
@@ -4893,23 +3968,6 @@ public class Game extends GameScene {
       }
 
       protected void placeStructure(Layer currentLayer, Structure<?> structure) {
-         if (NetSession.isActive()) {
-            // 联机：本地不改世界，改成命令，等 tick 边界两端一起执行
-            NetCommand cmd = NetCommand.place(
-               currentLayer.getIndex(),
-               structure.x,
-               structure.y,
-               structure.getSchema().type.id,
-               structure instanceof IRotatable ? ((IRotatable)structure).getDirection().ordinal() : structure.getUpDirection().ordinal(),
-               GOD_MODE
-            );
-            System.out.println(
-               "[Net] issue " + cmd + " (tick " + Game.this.simTick + " → " + (Game.this.simTick + NetSession.INPUT_DELAY) + ")"
-            );
-            NetSession.issue(cmd);
-            return;
-         }
-
          if (currentLayer.addStructure(structure)) {
             if (!Game.GOD_MODE) {
                Item.Items costs = structure.getSchema().buildCosts;

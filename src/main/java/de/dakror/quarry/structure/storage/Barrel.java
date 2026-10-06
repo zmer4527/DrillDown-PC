@@ -120,10 +120,6 @@ public class Barrel extends StorageStructure {
    }
 
    private void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.ui == null) {
          this.ui = new Table();
          this.fl = new Label("", Quarry.Q.skin);

@@ -14,7 +14,6 @@ import de.dakror.common.libgdx.io.NBT;
 import de.dakror.common.libgdx.render.SpriteRenderer;
 import de.dakror.quarry.Quarry;
 import de.dakror.quarry.game.Item;
-import de.dakror.quarry.game.SimRandom;
 import de.dakror.quarry.scenes.Game;
 import de.dakror.quarry.scenes.GameUi;
 import de.dakror.quarry.structure.base.component.CInventory;
@@ -154,7 +153,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
             if ((d.filter == null || d.filter.accepts(item)) && this.inputInventories[i].canAccept(item)) {
                this.inputInventories[i].add(item, 1);
                if (this.isClicked()) {
-                  Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
+                  Game.G.ui.updateStructureUIInventory();
                }
 
                if (this.activeRecipe == null) {
@@ -182,7 +181,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
             if (this.inputInventories[i].hasSpace() && d.filter.accepts(item)) {
                int rest = this.inputInventories[i].addWithRest(item, amount);
                if (this.isClicked()) {
-                  Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
+                  Game.G.ui.updateStructureUIInventory();
                }
 
                if (this.activeRecipe == null) {
@@ -327,7 +326,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
                }
 
                if (this.isClicked()) {
-                  Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
+                  Game.G.ui.updateStructureUIInventory();
                }
 
                this.activeItems = new Item.Items(inputs);
@@ -338,7 +337,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
 
          this.setRecipe(-1);
       } else {
-         this.setRecipe(SimRandom.G.nextInt(s.recipes.length));
+         this.setRecipe(MathUtils.random(s.recipes.length - 1));
       }
    }
 
@@ -358,10 +357,6 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
    }
 
    protected void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.ui != null) {
          if (this.activeRecipe == null) {
             this.ui.setActor(this.waitingLabel);
@@ -418,10 +413,7 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
          }
 
          if (this.ui != null) {
-            // 数值在这里（持有 simLock 时）算好，只把 setText 丢回渲染线程——
-            // 否则 lambda 稍后执行时 activeRecipe 可能已经变成 null
-            final String time = GameUi.formatResourceAmount(Math.min((float)((int)this.workDelay + 1), this.activeRecipe.workingTime)) + "s";
-            Game.G.postUi(() -> this.timeLabel.setText(time));
+            this.timeLabel.setText(GameUi.formatResourceAmount(Math.min((float)((int)this.workDelay + 1), this.activeRecipe.workingTime)) + "s");
          }
 
          if (this.workDelay <= 0.0F) {
@@ -551,13 +543,6 @@ public abstract class ProducerStructure extends PausableStructure<ProducerStruct
    }
 
    @Override
-   public void clearTransientState() {
-      super.clearTransientState();
-      // powerLevelMean 是 60 帧功率滑动平均，不存档；客机加载后是空的，主机必须同步清空，
-      // 否则生产速率计算（powerLevelMean.getMean()）两端不一致，几 tick 内就分叉。
-      this.powerLevelMean.clear();
-   }
-
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       b.Float("workDelay", this.workDelay).Int("recipe", this.activeRecipeIndex).Double("power", this.powerLevel);

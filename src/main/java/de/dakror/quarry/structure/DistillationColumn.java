@@ -417,11 +417,6 @@ public class DistillationColumn extends PausableStructure<PausableSchema> {
    }
 
    @Override
-   public void clearTransientState() {
-      super.clearTransientState();
-      this.powerLevelMean.clear();
-   }
-
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       b.Byte("level", (byte)this.level).Double("power", this.powerLevel);

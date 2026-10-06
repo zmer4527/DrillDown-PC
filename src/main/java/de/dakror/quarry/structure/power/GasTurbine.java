@@ -139,7 +139,7 @@ public class GasTurbine extends GeneratorStructure {
             if (this.inputInventories[i].hasSpace() && d.filter.accepts(item)) {
                int rest = this.inputInventories[i].addWithRest(item, amount);
                if (this.isClicked()) {
-                  Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
+                  Game.G.ui.updateStructureUIInventory();
                }
 
                if (this.level0.activeRecipe == null) {
@@ -289,7 +289,7 @@ public class GasTurbine extends GeneratorStructure {
 
             for (GasTurbine t : this.levels) {
                if (t.isClicked()) {
-                  Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
+                  Game.G.ui.updateStructureUIInventory();
                }
             }
          } else {
@@ -376,7 +376,7 @@ public class GasTurbine extends GeneratorStructure {
    @Override
    public void setSleeping(boolean sleeping) {
       super.setSleeping(sleeping);
-      this.layer.markDirty(this, 0);
+      this.layer.dirtyBounds.add(this, 0);
    }
 
    private Structure<?> getStructureAt(int x, int y) {
@@ -448,10 +448,6 @@ public class GasTurbine extends GeneratorStructure {
 
    @Override
    protected void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.ui != null) {
          if (this.level0.activeRecipe == null) {
             this.ui.setActor(this.waitingLabel);

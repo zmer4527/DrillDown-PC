@@ -9,7 +9,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Container;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.utils.Array;
-import de.dakror.quarry.scenes.Game;
 import de.dakror.common.libgdx.io.NBT;
 import de.dakror.common.libgdx.render.SpriteRenderer;
 import de.dakror.quarry.Quarry;
@@ -80,7 +79,7 @@ public class ElectricConveyorCore extends Conveyor {
    private void resetAdjacentConveyors() {
       for (ElectricConveyor p : this.connectedConveyors) {
          p.core = null;
-         this.layer.markDirty(p, 1);
+         this.layer.dirtyBounds.add(p, 1);
       }
 
       this.connectedConveyors.clear();
@@ -109,10 +108,6 @@ public class ElectricConveyorCore extends Conveyor {
    }
 
    private void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.container == null) {
          this.container = new Container();
       }
@@ -310,11 +305,6 @@ public class ElectricConveyorCore extends Conveyor {
    }
 
    @Override
-   public void clearTransientState() {
-      super.clearTransientState();
-      this.powerLevelMean.clear();
-   }
-
    protected void saveData(NBT.Builder b) {
       super.saveData(b);
       int[] arr = new int[this.connectedConveyors.size];

@@ -73,14 +73,11 @@ public class ScienceLab extends Structure<Schema> {
       if (this.activeScience != null) {
          this.workingTime = (float)((double)this.workingTime - deltaTime * (double)gameSpeed);
          if (this.workingTime <= 0.0F) {
+            Quarry.Q.sound.play(sfxSound);
             Game.G.removeCurrentScience(this.activeScience);
             Game.G.addScience(this.activeScience);
             this.activeScience = null;
-            // SoundManager.update 在渲染线程跑、Stage 也只能在渲染线程碰，所以都回迁
-            Game.G.postUi(() -> {
-               Quarry.Q.sound.play(this.sfxSound);
-               this.updateUI();
-            });
+            this.updateUI();
          }
       }
    }
@@ -108,10 +105,6 @@ public class ScienceLab extends Structure<Schema> {
    }
 
    protected void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.ui != null) {
          if (this.activeScience != null) {
             this.container.setActor(this.ui);

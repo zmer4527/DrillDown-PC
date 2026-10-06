@@ -189,56 +189,6 @@ public class Chunk implements Disposable, FBOable, Savable {
       return dirtyBounds.intersects(this.ax, this.ay, 32, 32);
    }
 
-   /**
-    * 瓦片自动拼接：被四个正交邻居全是同一种「可混合」瓦片（meta & BLENDING）包住的瓦片会被同化为该类型。
-    * 规则与原 drawBaseTile 内联实现逐条等价（邻居取 base 归一化、四个正交邻居都要非空且不等于自身、
-    * 同化结果取 y-1 那个邻居），区别只是从渲染期挪到了模拟步，这样地图内容不再依赖渲染时机，联机各端一致。
-    * 传入的是调用方在进入本方法前取的脏区快照，避免本方法内 set() 反过来扩大遍历范围（级联留给后续 tick）。
-    */
-   public void promoteSurroundedTiles(int bx, int by, int bw, int bh) {
-      if (bw <= 0 || bh <= 0 || bx + bw <= this.ax || bx >= this.ax + 32 || by + bh <= this.ay || by >= this.ay + 32) {
-         return;
-      }
-
-      int x0 = Math.max(bx, this.ax) - this.ax;
-      int x1 = Math.min(bx + bw, this.ax + 32) - this.ax;
-      int y0 = Math.max(by, this.ay) - this.ay;
-      int y1 = Math.min(by + bh, this.ay + 32) - this.ay;
-
-      for (int x = x0; x < x1; x++) {
-         int tx = this.ax + x;
-
-         for (int y = y0; y < y1; y++) {
-            int ty = this.ay + y;
-            Tile.TileType t = this.layer.get(tx, ty);
-            if (t.name == null) {
-               continue;
-            }
-
-            if (t.base != null) {
-               t = t.base;
-            }
-
-            Tile.TileType south = this.blendingNeighbor(tx, ty - 1, t);
-            Tile.TileType north = this.blendingNeighbor(tx, ty + 1, t);
-            Tile.TileType west = this.blendingNeighbor(tx - 1, ty, t);
-            Tile.TileType east = this.blendingNeighbor(tx + 1, ty, t);
-            if (south != null && north != null && west != null && east != null) {
-               this.layer.set(tx, ty, south);
-            }
-         }
-      }
-   }
-
-   private Tile.TileType blendingNeighbor(int x, int y, Tile.TileType t) {
-      Tile.TileType u = this.layer.get(x, y);
-      if (u.base != null) {
-         u = u.base;
-      }
-
-      return (u.meta & 64) == 64 && u != t ? u : null;
-   }
-
    private void drawBaseTile(Tile.TileType t, int x, int y, Batch batch) {
       if (texLookup.isEmpty()) {
          initTexCache();
@@ -266,7 +216,7 @@ public class Chunk implements Disposable, FBOable, Savable {
 
       if (any) {
          if (neighbors[1][0] != null && neighbors[1][2] != null && neighbors[0][1] != null && neighbors[2][1] != null) {
-            // 同化已挪到模拟步（Chunk.promoteSurroundedTiles），这里只负责画
+            this.layer.set(this.ax + x, this.ay + y, neighbors[1][0]);
             batch.draw(neighbors[1][0].tex, (float)(x * 64), (float)(y * 64), 64.0F, 64.0F);
             return;
          }
@@ -550,7 +500,7 @@ public class Chunk implements Disposable, FBOable, Savable {
          CopperCable c = (CopperCable)this.cables.remove(x * 32 + y);
          if (c != null) {
             c.onDestroy();
-            this.layer.markDirty(c, 512);
+            this.layer.dirtyBounds.add(c, 512);
             return true;
          } else {
             return false;
@@ -585,7 +535,7 @@ public class Chunk implements Disposable, FBOable, Savable {
 
                this.layer.setCollision(q, false);
                q.onDestroy();
-               this.layer.markDirty(q, 512);
+               this.layer.dirtyBounds.add(q, 512);
                if (q instanceof StorageStructure) {
                   this.layer.storages.removeValue((StorageStructure)q, true);
                } else if (q instanceof Conveyor) {
@@ -669,7 +619,7 @@ public class Chunk implements Disposable, FBOable, Savable {
          }
 
          if (!fromLoading) {
-            this.layer.markDirty(s, 256);
+            this.layer.dirtyBounds.add(s, 256);
 
             for (Dock d : s.getDocks()) {
                this.layer.setItemNotification(s.x + d.x + d.dir.dx, s.y + d.y + d.dir.dy);
@@ -699,19 +649,6 @@ public class Chunk implements Disposable, FBOable, Savable {
 
    public Array<Structure<?>> getStructures() {
       return this.structures;
-   }
-
-   /** 清空本块内所有结构的瞬态历史（发世界前调用）。 */
-   public void clearTransientState() {
-      synchronized (this.structLock) {
-         for (Structure<?> st : (Structure[])this.structures.items) {
-            if (st == null) {
-               break;
-            }
-
-            st.clearTransientState();
-         }
-      }
    }
 
    public int getItemCount() {

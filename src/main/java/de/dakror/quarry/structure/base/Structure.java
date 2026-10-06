@@ -216,13 +216,6 @@ public abstract class Structure<T extends Schema> implements Savable, QuadTree.R
       }
    }
 
-   /** 清空未存档的瞬态历史（滑动窗口、倒计时等）。联机发世界前主机会调用，让两端起点一致。 */
-   public void clearTransientState() {
-      for (Component c : this.components) {
-         c.clearTransientState();
-      }
-   }
-
    public void reloadPowerNetwork() {
       if (this.getSchema().powerDocks > 0) {
          this.powerNetwork.updateConnections(this);
@@ -231,7 +224,7 @@ public abstract class Structure<T extends Schema> implements Savable, QuadTree.R
 
    protected void setDirty() {
       if (this.layer != null) {
-         this.layer.markDirty(this, 0);
+         this.layer.dirtyBounds.add(this, 0);
       }
    }
 

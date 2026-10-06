@@ -6,7 +6,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.modified.TextTooltip;
 import de.dakror.common.BiCallback;
-import de.dakror.quarry.scenes.Game;
 import de.dakror.common.libgdx.io.NBT;
 import de.dakror.common.libgdx.render.SpriteRenderer;
 import de.dakror.quarry.Quarry;
@@ -93,10 +92,6 @@ public class Tank extends Structure<Schema> {
    }
 
    private void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (this.container == null) {
          this.container = new Container();
       }

@@ -166,7 +166,7 @@ public class Centrifuge extends ProducerStructure {
                lubricantTank.removeWithRest(
                   Item.ItemType.Lubricant, (int)Math.round((double)(this.activeRecipe.getInput().entries[1].getAmount() * gameSpeed) * deltaTime)
                );
-               Game.G.postUi(() -> Game.G.ui.updateStructureUIInventory());
+               Game.G.ui.updateStructureUIInventory();
             }
          }
       }

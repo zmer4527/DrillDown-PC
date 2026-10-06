@@ -10,7 +10,6 @@ import com.badlogic.gdx.scenes.scene2d.ui.Widget;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
 import com.badlogic.gdx.utils.Scaling;
-import de.dakror.quarry.scenes.Game;
 import de.dakror.common.libgdx.io.NBT;
 import de.dakror.common.libgdx.render.SpriteRenderer;
 import de.dakror.common.libgdx.ui.CropDrawable;
@@ -156,10 +155,6 @@ public class Boiler extends PausableStructure<PausableSchema> {
    }
 
    private void updateUI() {
-      if (!Game.isRenderThread()) {
-         Game.G.postUi(this::updateUI);
-         return;
-      }
       if (container != null) {
          thermo.setUserObject(this);
          ((Label)((Table)ui.getChildren().get(0)).getChildren().get(1)).setText(GameUi.formatResourceAmount((float)this.tank.getCount() / 1000.0F, true) + "L");

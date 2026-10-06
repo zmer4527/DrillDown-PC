@@ -3538,13 +3538,35 @@ public class Game extends GameScene {
          sb.append(" layers=").append(this.layers.size);
 
          for (int i = 0; i < this.layers.size; i++) {
+            Layer l = this.layers.get(i);
             NBT.Builder b = new NBT.Builder("L");
             b.List("Map", NBT.TagType.Compound);
-            this.layers.get(i).save(b);
+            l.save(b);
             b.End();
             SimHash lh = new SimHash();
             lh.hashTag(b.Get());
             sb.append(" L").append(i).append("=").append(Long.toHexString(lh.value()));
+
+            // 逐 chunk 哈希，用于进一步定位到具体哪一块（瓦片 + 结构）
+            sb.append(" chunks=[");
+            Chunk[] cs = l.getChunks();
+
+            for (int ci = 0; ci < cs.length; ci++) {
+               NBT.Builder cb = new NBT.Builder("C");
+               cb.List("Map", NBT.TagType.Compound);
+               cs[ci].save(cb);
+               cb.End();
+               SimHash cch = new SimHash();
+               cch.hashTag(cb.Get());
+
+               if (ci > 0) {
+                  sb.append(',');
+               }
+
+               sb.append(ci).append(':').append(Long.toHexString(cch.value()));
+            }
+
+            sb.append(']');
          }
       }
 

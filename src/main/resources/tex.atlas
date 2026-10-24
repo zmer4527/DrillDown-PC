@@ -2680,6 +2680,13 @@ structure_itemdestroyer
   orig: 64, 64
   offset: 0, 0
   index: -1
+icon_itemdestroyer
+  rotate: false
+  xy: 2024, 0
+  size: 60, 60
+  orig: 60, 60
+  offset: 0, 0
+  index: -1
 structure_steamturbine
   rotate: false
   xy: 843, 625

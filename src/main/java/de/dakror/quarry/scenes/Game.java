@@ -192,7 +192,8 @@ public class Game extends GameScene {
             int y2 = y1 + d.dy;
             if (x2 >= 0 && y2 >= 0 && x2 < Game.this.layer.width && y2 < Game.this.layer.height) {
                int index = x2 * Game.this.layer.height + y2;
-               if (Game.this.trailStructureCanBePlaced(index, start, end)) {
+               if (Game.this.trailStructureCanBePlaced(index, start, end)
+                  || (index != start && index != end && Game.this.isConveyorCrossing(x2, y2, d))) {
                   visitor.visit(index);
                }
             }
@@ -265,9 +266,6 @@ public class Game extends GameScene {
    List<Structure<?>> copyCollisions = new ArrayList<>();
    public int[] copyRegion = new int[4];
    EnumMap<Item.ItemType, Integer> copyCost;
-   final TextureRegion endMarker = Quarry.Q.atlas.findRegion("end_marker");
-   final TextureRegion endMarkerGlow = Quarry.Q.atlas.findRegion("end_marker_glow");
-   final TextureRegion endMarkerA = Quarry.Q.atlas.findRegion("end_marker_a");
    final Vector2 activeTile = new Vector2(-1.0F, 0.0F);
    int hoverTileX;
    int hoverTileY;
@@ -858,51 +856,24 @@ public class Game extends GameScene {
                   this.shaper.setColor(0.8F, 0.1F, 0.1F, 0.75F);
                }
 
-               this.batch.draw(this.endMarkerGlow, (this.endA.x + 0.5F) * 64.0F - (float)(this.endMarkerA.getRegionWidth() / 2), (this.endA.y + 0.2F) * 64.0F);
-               if (this.endB.x > -1.0F) {
-                  this.batch
-                     .draw(this.endMarkerGlow, (this.endB.x + 0.5F) * 64.0F - (float)(this.endMarker.getRegionWidth() / 2), (this.endB.y + 0.2F) * 64.0F);
-                  Gdx.gl.glEnable(3042);
-                  this.batch.end();
-                  this.shaper.setProjectionMatrix(this.cam.combined);
-                  this.shaper.begin(ShapeType.Filled);
-                  Gdx.gl.glEnable(3042);
-                  this.shaper
-                     .rectLine((this.endA.x + 0.5F) * 64.0F, (this.endA.y + 0.5F) * 64.0F, (this.endB.x + 0.5F) * 64.0F, (this.endB.y + 0.5F) * 64.0F, 6.0F);
-                  if (this.camControl.elementPlaceable && this.ui.canAffordStructure) {
-                     this.shaper.setColor(0.2F, 1.0F, 0.2F, 0.6F);
-                  } else {
-                     this.shaper.setColor(1.0F, 0.2F, 0.2F, 0.6F);
-                  }
-
-                  this.shaper
-                     .rectLine((this.endA.x + 0.5F) * 64.0F, (this.endA.y + 0.5F) * 64.0F, (this.endB.x + 0.5F) * 64.0F, (this.endB.y + 0.5F) * 64.0F, 2.0F);
-                  this.shaper.end();
-                  this.batch.begin();
-               }
-
-               this.batch.setColor(1.0F, 1.0F, 1.0F, 1.0F);
-               float factorA = this.activeEnd == 1 ? 1.35F : 1.0F;
-               float widthA = (float)this.endMarkerA.getRegionWidth() * factorA;
-               float heightA = (float)this.endMarkerA.getRegionHeight() * factorA;
-               if (this.endA.y > this.endB.y) {
-                  this.batch.draw(this.endMarkerA, (this.endA.x + 0.5F) * 64.0F - widthA / 2.0F, (this.endA.y + 0.2F / factorA) * 64.0F, widthA, heightA);
-                  if (this.endB.x > -1.0F) {
-                     float factorB = this.activeEnd == 2 ? 1.35F : 1.0F;
-                     float widthB = (float)this.endMarker.getRegionWidth() * factorB;
-                     float heightB = (float)this.endMarker.getRegionHeight() * factorB;
-                     this.batch.draw(this.endMarker, (this.endB.x + 0.5F) * 64.0F - widthB / 2.0F, (this.endB.y + 0.2F / factorB) * 64.0F, widthB, heightB);
-                  }
+               Gdx.gl.glEnable(3042);
+               this.batch.end();
+               this.shaper.setProjectionMatrix(this.cam.combined);
+               this.shaper.begin(ShapeType.Filled);
+               Gdx.gl.glEnable(3042);
+               this.shaper
+                  .rectLine((this.endA.x + 0.5F) * 64.0F, (this.endA.y + 0.5F) * 64.0F, (this.endB.x + 0.5F) * 64.0F, (this.endB.y + 0.5F) * 64.0F, 6.0F);
+               if (this.camControl.elementPlaceable && this.ui.canAffordStructure) {
+                  this.shaper.setColor(0.2F, 1.0F, 0.2F, 0.6F);
                } else {
-                  if (this.endB.x > -1.0F) {
-                     float factorB = this.activeEnd == 2 ? 1.35F : 1.0F;
-                     float widthB = (float)this.endMarker.getRegionWidth() * factorB;
-                     float heightB = (float)this.endMarker.getRegionHeight() * factorB;
-                     this.batch.draw(this.endMarker, (this.endB.x + 0.5F) * 64.0F - widthB / 2.0F, (this.endB.y + 0.2F / factorB) * 64.0F, widthB, heightB);
-                  }
-
-                  this.batch.draw(this.endMarkerA, (this.endA.x + 0.5F) * 64.0F - widthA / 2.0F, (this.endA.y + 0.2F / factorA) * 64.0F, widthA, heightA);
+                  this.shaper.setColor(1.0F, 0.2F, 0.2F, 0.6F);
                }
+
+               this.shaper
+                  .rectLine((this.endA.x + 0.5F) * 64.0F, (this.endA.y + 0.5F) * 64.0F, (this.endB.x + 0.5F) * 64.0F, (this.endB.y + 0.5F) * 64.0F, 2.0F);
+               this.shaper.end();
+               this.batch.begin();
+               this.batch.setColor(1.0F, 1.0F, 1.0F, 1.0F);
             } else {
                if (this.structureDestroyMode || this.cableDestroyMode) {
                   this.batch.setColor(1.0F, 0.5F, 0.5F, 1.0F);
@@ -913,24 +884,6 @@ public class Game extends GameScene {
                }
 
                this.activeStructure.draw(this.delegate);
-               if (this.endA.x > -1.0F) {
-                  float factorA = this.activeEnd == 1 ? 1.35F : 1.0F;
-                  float widthA = (float)this.endMarkerA.getRegionWidth() * factorA;
-                  float heightA = (float)this.endMarkerA.getRegionHeight() * factorA;
-                  if (this.camControl.elementPlaceable && this.ui.canAffordStructure) {
-                     this.batch.setColor(0.1F, 0.8F, 0.1F, 1.0F);
-                     this.shaper.setColor(0.1F, 0.8F, 0.1F, 0.75F);
-                  } else {
-                     this.batch.setColor(0.8F, 0.1F, 0.1F, 1.0F);
-                     this.shaper.setColor(0.8F, 0.1F, 0.1F, 0.75F);
-                  }
-
-                  this.batch
-                     .draw(this.endMarkerGlow, (this.endA.x + 0.5F) * 64.0F - (float)(this.endMarkerA.getRegionWidth() / 2), (this.endA.y + 0.2F) * 64.0F);
-                  this.batch.setColor(1.0F, 1.0F, 1.0F, 1.0F);
-                  this.batch.draw(this.endMarkerA, (this.endA.x + 0.5F) * 64.0F - widthA / 2.0F, (this.endA.y + 0.2F / factorA) * 64.0F, widthA, heightA);
-               }
-
                this.batch.setColor(1.0F, 1.0F, 1.0F, 1.0F);
             }
 
@@ -940,9 +893,6 @@ public class Game extends GameScene {
          }
 
          if ((this.bulkDestroyMode || this.bulkCableMode || this.copyMode) && this.endA.x > -1.0F) {
-            float factorA = this.activeEnd == 1 ? 1.35F : 1.0F;
-            float widthA = (float)this.endMarkerA.getRegionWidth() * factorA;
-            float heightA = (float)this.endMarkerA.getRegionHeight() * factorA;
             if (this.endB.x > -1.0F) {
                if (this.copyMode) {
                   this.batch.setColor(0.1F, 0.1F, 0.8F, 0.5F);
@@ -967,27 +917,7 @@ public class Game extends GameScene {
                this.shaper.end();
                this.shaper.setColor(1.0F, 1.0F, 1.0F, 1.0F);
                this.batch.begin();
-               this.batch.draw(this.endMarkerGlow, (this.endA.x + 0.5F) * 64.0F - (float)(this.endMarkerA.getRegionWidth() / 2), (this.endA.y + 0.2F) * 64.0F);
-               this.batch.draw(this.endMarkerGlow, (this.endB.x + 0.5F) * 64.0F - (float)(this.endMarker.getRegionWidth() / 2), (this.endB.y + 0.2F) * 64.0F);
                this.batch.setColor(1.0F, 1.0F, 1.0F, 1.0F);
-               if (this.endA.y > this.endB.y) {
-                  this.batch.draw(this.endMarkerA, (this.endA.x + 0.5F) * 64.0F - widthA / 2.0F, (this.endA.y + 0.2F / factorA) * 64.0F, widthA, heightA);
-                  if (this.endB.x > -1.0F) {
-                     float factorB = this.activeEnd == 2 ? 1.35F : 1.0F;
-                     float widthB = (float)this.endMarker.getRegionWidth() * factorB;
-                     float heightB = (float)this.endMarker.getRegionHeight() * factorB;
-                     this.batch.draw(this.endMarker, (this.endB.x + 0.5F) * 64.0F - widthB / 2.0F, (this.endB.y + 0.2F / factorB) * 64.0F, widthB, heightB);
-                  }
-               } else {
-                  if (this.endB.x > -1.0F) {
-                     float factorB = this.activeEnd == 2 ? 1.35F : 1.0F;
-                     float widthB = (float)this.endMarker.getRegionWidth() * factorB;
-                     float heightB = (float)this.endMarker.getRegionHeight() * factorB;
-                     this.batch.draw(this.endMarker, (this.endB.x + 0.5F) * 64.0F - widthB / 2.0F, (this.endB.y + 0.2F / factorB) * 64.0F, widthB, heightB);
-                  }
-
-                  this.batch.draw(this.endMarkerA, (this.endA.x + 0.5F) * 64.0F - widthA / 2.0F, (this.endA.y + 0.2F / factorA) * 64.0F, widthA, heightA);
-               }
             } else {
                if (this.copyMode) {
                   this.batch.setColor(0.1F, 0.1F, 0.8F, 0.5F);
@@ -1006,9 +936,7 @@ public class Game extends GameScene {
                this.shaper.end();
                this.shaper.setColor(1.0F, 1.0F, 1.0F, 1.0F);
                this.batch.begin();
-               this.batch.draw(this.endMarkerGlow, (this.endA.x + 0.5F) * 64.0F - (float)(this.endMarkerA.getRegionWidth() / 2), (this.endA.y + 0.2F) * 64.0F);
                this.batch.setColor(1.0F, 1.0F, 1.0F, 1.0F);
-               this.batch.draw(this.endMarkerA, (this.endA.x + 0.5F) * 64.0F - widthA / 2.0F, (this.endA.y + 0.2F / factorA) * 64.0F, widthA, heightA);
             }
          }
 
@@ -1610,6 +1538,11 @@ public class Game extends GameScene {
                return false;
             }
          } else if (!end) {
+            Structure<?> trailS = (Structure<?>)this.activeStructureTrail.get(i);
+            if (trailS instanceof ConveyorBridge) {
+               return true;
+            }
+
             if (this.layer.isCollision(x, y, !(this.activeStructure instanceof Conveyor), !(this.activeStructure instanceof FluidTubeStructure))) {
                return false;
             }
@@ -1628,6 +1561,18 @@ public class Game extends GameScene {
 
          return true;
       }
+   }
+
+   public boolean isConveyorCrossing(int x, int y, Direction d) {
+      if (this.activeStructure == null || this.activeStructure.getSchema().type != StructureType.Conveyor) {
+         return false;
+      }
+
+      Structure<?> existing = this.layer.getStructure(x, y);
+      return existing instanceof Conveyor
+         && !(existing instanceof ConveyorBridge)
+         && existing.getSchema().type == StructureType.Conveyor
+         && ((Conveyor)existing).getDirection().isPerpendicular(d);
    }
 
    public synchronized void addResources(Item.ItemType item, int amount, boolean addToAStorage) {
@@ -3200,6 +3145,17 @@ public class Game extends GameScene {
          }
       }
 
+      @Override
+      protected boolean canPlaceActiveElementAt(int x, int y, int tileX, int tileY) {
+         if (Game.this.activeStructure != null
+            && Game.this.activeStructure.getSchema().has(Schema.Flags.Draggable)
+            && Game.this.endB.x > -1.0F) {
+            return true;
+         }
+
+         return super.canPlaceActiveElementAt(x, y, tileX, tileY);
+      }
+
       protected void updateCopySelection() {
          int x1 = (int)Math.min(Game.this.endA.x, Game.this.endB.x);
          int y1 = (int)Math.min(Game.this.endA.y, Game.this.endB.y);
@@ -3362,6 +3318,26 @@ public class Game extends GameScene {
          }
       }
 
+      private Structure<?> createTrailStructure(int x, int y, Direction rotation) {
+         if (rotation != null && Game.this.activeStructure.getSchema().type == StructureType.Conveyor) {
+            Structure<?> existing = Game.this.layer.getStructure(x, y);
+            if (existing instanceof Conveyor
+               && !(existing instanceof ConveyorBridge)
+               && existing.getSchema().type == StructureType.Conveyor
+               && ((Conveyor)existing).getDirection().isPerpendicular(rotation)) {
+               boolean prev = ((Conveyor)existing).getDirection() == rotation.prev();
+               return new ConveyorBridge(x, y, rotation, prev, ConveyorBridge.classSchema);
+            }
+         }
+
+         Structure<?> s = (Structure<?>)Game.this.activeStructure.clone();
+         if (rotation != null && s instanceof IRotatable) {
+            ((IRotatable)s).setRotation(rotation);
+         }
+
+         return s;
+      }
+
       public void updateTrail() {
          if (Game.this.endA.x != -1.0F) {
             Game.this.activeStructure.update(0.0, 1, Game.G.layer.dirtyBounds);
@@ -3395,9 +3371,9 @@ public class Game extends GameScene {
                   for (int i : Game.this.activeStructurePath) {
                      int x = i / Game.this.layer.height;
                      int y = i % Game.this.layer.height;
-                     Structure<?> s = (Structure<?>)Game.this.activeStructure.clone();
-                     if (s instanceof IRotatable) {
-                        Direction rotation = ((IRotatable)Game.this.activeStructure).getDirection();
+                     Direction rotation = null;
+                     if (Game.this.activeStructure instanceof IRotatable) {
+                        rotation = ((IRotatable)Game.this.activeStructure).getDirection();
                         if (last != null) {
                            if (x == last.x) {
                               rotation = y > last.y ? Direction.South : Direction.North;
@@ -3405,9 +3381,14 @@ public class Game extends GameScene {
                               rotation = x > last.x ? Direction.West : Direction.East;
                            }
                         }
+                     }
 
-                        ((IRotatable)s).setRotation(rotation);
-                        if (last != null && (float)last.x == Game.this.endB.x && (float)last.y == Game.this.endB.y) {
+                     Structure<?> s = this.createTrailStructure(x, y, rotation);
+                     if (s instanceof IRotatable) {
+                        if (last != null
+                           && !(last instanceof ConveyorBridge)
+                           && (float)last.x == Game.this.endB.x
+                           && (float)last.y == Game.this.endB.y) {
                            ((IRotatable)last).setRotation(rotation);
                         }
 
@@ -3463,7 +3444,7 @@ public class Game extends GameScene {
                      }
                   }
 
-                  if (target != null) {
+                  if (target != null && !(s instanceof ConveyorBridge)) {
                      ((IRotatable)s).setRotation(targetDirection);
                   }
                }
@@ -3872,6 +3853,18 @@ public class Game extends GameScene {
       protected void placeActiveElement() {
          if (Game.this.endB.x > -1.0F) {
             this.placingTrail = true;
+
+            for (Structure<?> s : Game.this.activeStructureTrail.values()) {
+               if (s instanceof ConveyorBridge) {
+                  Structure<?> existing = Game.this.layer.getStructure(s.x, s.y);
+                  if (existing instanceof Conveyor
+                     && existing.getSchema().type == StructureType.Conveyor
+                     && existing != s) {
+                     ((Conveyor)existing).transferItemsTo((Conveyor)s);
+                     Game.this.layer.removeStructure(existing);
+                  }
+               }
+            }
 
             for (Structure<?> s : Game.this.activeStructureTrail.values()) {
                this.placeStructure(Game.this.layer, s);

@@ -201,7 +201,6 @@ public class GameUi implements Ui {
    ImageButton buildButton;
    ImageButton bulkButton;
    ImageButton bulkCableButton;
-   ImageButton flipButton;
    public ImageButton destroyButton;
    ImageButton cableRemoveButton;
    public ImageButton pauseButton;
@@ -337,18 +336,6 @@ public class GameUi implements Ui {
       this.stage.addActor(this.layerSelection);
       this.layerSelection.setX(this.layerSelection.getX() + 40.0F);
       Util.lml("buttons");
-      this.flipButton = Util.id("flip");
-      this.flipButton.addListener(new ClickListener() {
-         public void clicked(InputEvent event, float x, float y) {
-            Quarry.Q.sound.play(Quarry.Q.clickSfx);
-            GameUi.this.flipActiveStructure();
-         }
-      });
-      this.flipButton.getImageCell().size(64.0F);
-      this.flipButton.setPosition(Const.UI_W / 2.0F + this.flipButton.getWidth() / 4.0F, 500.0F);
-      this.flipButton.setName("flipButton");
-      this.flipButton.addListener(new TextTooltip(Quarry.Q.i18n.get("button.flip"), skin));
-      this.stage.addActor(this.flipButton);
       this.buildButton = this.roundButton(skin, skin.getDrawable("icon_build"), new ClickListener() {
          public void clicked(InputEvent event, float x, float y) {
             Quarry.Q.sound.play(Quarry.Q.clickSfx);
@@ -678,12 +665,10 @@ public class GameUi implements Ui {
                GameUi.this.tooltip.addAction(Actions.sequence(Actions.moveBy(0.0F, -delta, 0.15F, Interpolation.circle)));
                GameUi.this.tooltipClose.addAction(Actions.sequence(Actions.moveBy(0.0F, -delta, 0.15F, Interpolation.circle)));
                GameUi.this.tooltipCollapse.addAction(Actions.sequence(Actions.moveBy(0.0F, -delta, 0.15F, Interpolation.circle)));
-               GameUi.this.flipButton.addAction(Actions.sequence(Actions.moveBy(0.0F, -delta, 0.15F, Interpolation.circle)));
             } else {
                GameUi.this.tooltip.addAction(Actions.sequence(Actions.moveBy(0.0F, delta, 0.15F, Interpolation.circle)));
                GameUi.this.tooltipClose.addAction(Actions.sequence(Actions.moveBy(0.0F, delta, 0.15F, Interpolation.circle)));
                GameUi.this.tooltipCollapse.addAction(Actions.sequence(Actions.moveBy(0.0F, delta, 0.15F, Interpolation.circle)));
-               GameUi.this.flipButton.addAction(Actions.sequence(Actions.moveBy(0.0F, delta, 0.15F, Interpolation.circle)));
             }
          }
       });
@@ -1259,9 +1244,6 @@ public class GameUi implements Ui {
       this.tooltipClose.setVisible(false);
       this.tooltipCollapse.setChecked(false);
       this.tooltipCollapse.setVisible(false);
-      if (selected != null) {
-         this.showOrHideFlipButton();
-      }
    }
 
    protected Button scienceMenuItem(Science.ScienceType science) {
@@ -1352,35 +1334,6 @@ public class GameUi implements Ui {
    @Override
    public void hide(Window w) {
       w.addAction(Actions.sequence(Actions.fadeOut(0.15F, Interpolation.fade), Actions.removeActor()));
-   }
-
-   protected void showOrHideFlipButton() {
-      if (this.flipButton != null && this.tooltip != null) {
-         if (Game.G.activeStructure == this.tooltipCurrentStructure || this.currentClickedStructure != null) {
-            this.flipButton.clearActions();
-            if (!(this.tooltipCurrentStructure instanceof IFlippable) && !(this.currentClickedStructure instanceof IFlippable)) {
-               this.flipButton
-                  .addAction(
-                     Actions.sequence(
-                        Actions.parallel(
-                           Actions.moveTo(this.flipButton.getX(), this.tooltip.getY() + 200.0F, 0.15F, Interpolation.swingOut), Actions.fadeOut(0.1F)
-                        ),
-                        Actions.visible(false),
-                        Actions.alpha(1.0F)
-                     )
-                  );
-            } else {
-               this.flipButton
-                  .addAction(
-                     Actions.sequence(
-                        Actions.alpha(1.0F),
-                        Actions.visible(true),
-                        Actions.moveTo(this.flipButton.getX(), this.tooltip.getY() + this.tooltip.getHeight() + 20.0F, 0.15F, Interpolation.swingOut)
-                     )
-                  );
-            }
-         }
-      }
    }
 
    public void updateResources(boolean justRegister) {
@@ -1860,7 +1813,6 @@ public class GameUi implements Ui {
       this.tooltipClose.setVisible(false);
       this.tooltipCollapse.setVisible(false);
       this.tooltipCollapse.setChecked(false);
-      this.flipButton.addAction(Actions.sequence(Actions.visible(false), Actions.moveTo(this.flipButton.getX(), this.tooltip.getY() + 200.0F)));
       this.stage.unfocusAll();
    }
 
@@ -1881,10 +1833,6 @@ public class GameUi implements Ui {
          this.hideStructureUI();
          this.tileUI.hide();
          this.currentClickedStructure = s;
-
-         if (s instanceof IFlippable) {
-            this.showOrHideFlipButton();
-         }
 
          if (s instanceof Conveyor && !(s instanceof ElectricConveyorCore)) {
             s.onClick(this.structureUIContent);
@@ -1971,8 +1919,6 @@ public class GameUi implements Ui {
             ImageButton ib = this.structureUIButtons[ix];
             ib.setVisible(false);
          }
-
-         this.showOrHideFlipButton();
       }
 
       this.itemSelection.hide();

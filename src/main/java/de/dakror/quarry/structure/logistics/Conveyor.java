@@ -650,6 +650,30 @@ public class Conveyor extends Structure<Conveyor.ConveyorSchema> implements IRot
       }
    }
 
+   public void transferItemsTo(Conveyor target) {
+      if (target == null || target == this) {
+         return;
+      }
+
+      synchronized (this.itemLock) {
+         synchronized (target.itemLock) {
+            for (int i = 0; i < this.items.length; i++) {
+               ItemEntity e = this.items[i];
+               if (e != null) {
+                  target.items[i] = e;
+                  e.x = target.x;
+                  e.y = target.y;
+                  this.items[i] = null;
+                  target.itemCount++;
+               }
+            }
+
+            this.itemCount = 0;
+            target.itemChanges = true;
+         }
+      }
+   }
+
    public float getItemZ(Item.ItemType type, Direction direction) {
       return -4.0F;
    }

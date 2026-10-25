@@ -59,6 +59,10 @@ public abstract class EditorCameraControl extends InputAdapter {
 
    protected abstract boolean isWithinActiveElement(int var1, int var2, int var3, int var4);
 
+   protected boolean canPlaceActiveElementAt(int x, int y, int tileX, int tileY) {
+      return this.isWithinActiveElement(x, y, tileX, tileY);
+   }
+
    protected abstract void setParamRawPosition(Vector2 var1, int var2, int var3, int var4, int var5);
 
    @Override
@@ -71,7 +75,7 @@ public abstract class EditorCameraControl extends InputAdapter {
          int tileX = (int)(this.tmp.x / (float)this.tileSize);
          int tileY = (int)(this.tmp.y / (float)this.tileSize);
          this.updateActiveElementPlaceable();
-         if (this.elementPlaceable && this.isWithinActiveElement((int)this.tmp.x, (int)this.tmp.y, tileX, tileY) && this.isActiveElementEnabled()) {
+         if (this.elementPlaceable && this.canPlaceActiveElementAt((int)this.tmp.x, (int)this.tmp.y, tileX, tileY) && this.isActiveElementEnabled()) {
             this.placeActiveElement();
             this.updateActiveElementPlaceable();
             return true;

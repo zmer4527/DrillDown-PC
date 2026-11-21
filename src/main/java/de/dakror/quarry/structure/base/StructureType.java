@@ -29,6 +29,7 @@ import de.dakror.quarry.structure.power.CableShaft;
 import de.dakror.quarry.structure.power.CableShaftBelow;
 import de.dakror.quarry.structure.power.Capacitor;
 import de.dakror.quarry.structure.power.CopperCable;
+import de.dakror.quarry.structure.power.CopperCableCrossing;
 import de.dakror.quarry.structure.power.GasTurbine;
 import de.dakror.quarry.structure.power.HighPowerShaft;
 import de.dakror.quarry.structure.power.HighPowerShaftBelow;
@@ -153,6 +154,7 @@ public final class StructureType {
    public static final StructureType PowerPoleGhost = register(104, "PowerPoleGhost", PowerPoleGhost.class);
    public static final StructureType AnchorPortal = register(105, "AnchorPortal", AnchorPortal.class);
    public static final StructureType SuperCapacitor = register(106, "SuperCapacitor", SuperCapacitor.class);
+   public static final StructureType CopperCableCrossing = register(107, "CopperCableCrossing", CopperCableCrossing.class);
    public static final StructureType WaterWheel = register(110, "WaterWheel", WaterWheel.class);
    public static final StructureType SteamTurbine = register(111, "SteamTurbine", SteamTurbine.class);
    public static final StructureType SolarPanelOutlet = register(112, "SolarPanelOutlet", SolarPanelOutlet.class);

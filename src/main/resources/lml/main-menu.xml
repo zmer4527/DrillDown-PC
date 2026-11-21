@@ -20,10 +20,16 @@
 	<:row />
 	<table align="left" defaultheight="80"
 		defaultalign="left,center" defaultgrowx="false" defaultpadbottom="30" padLeft="200">
+		<textbutton row="true" id="continue_game" text="@menu.continue_game"
+			style="main_menu_item" />
+
 		<textbutton row="true" id="new_game" text="@menu.new_game"
 			style="main_menu_item" />
 
 		<textbutton row="true" id="load_game" text="@menu.load_game"
+			style="main_menu_item" />
+
+		<textbutton row="true" id="sandbox" text="@menu.sandbox"
 			style="main_menu_item" />
 
 		<textbutton row="true" id="select_external" text="@menu.select_external"

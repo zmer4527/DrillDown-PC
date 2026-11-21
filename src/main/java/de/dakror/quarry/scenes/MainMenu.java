@@ -32,6 +32,7 @@ import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.scenes.scene2d.utils.Drawable;
 import com.badlogic.gdx.scenes.scene2d.utils.ChangeListener.ChangeEvent;
 import com.badlogic.gdx.utils.Array;
+import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import de.dakror.common.Callback;
 import de.dakror.common.Response;
@@ -61,6 +62,8 @@ public class MainMenu extends Scene implements Ui {
    ScrollPane saves;
    VerticalGroup savesList;
    TextButton tutorial;
+   TextButton continueGame;
+   TextButton sandbox;
    Image overlay;
    Image modalOverlay;
    Toast toast;
@@ -111,7 +114,76 @@ public class MainMenu extends Scene implements Ui {
    public void show() {
       super.show();
       this.tutorial.setVisible(!Quarry.Q.prefs.getBoolean("tutorial", true));
+      this.refreshContinueButton();
       Quarry.Q.sound.playMusic(this.music, true);
+   }
+
+   private String getLatestSaveName() {
+      FileHandle latest = null;
+
+      for (FileHandle fh : Quarry.Q.listFiles()) {
+         if (latest == null || fh.lastModified() > latest.lastModified()) {
+            latest = fh;
+         }
+      }
+
+      return latest == null ? null : latest.nameWithoutExtension();
+   }
+
+   private void refreshContinueButton() {
+      if (this.continueGame != null) {
+         this.continueGame.setDisabled(this.getLatestSaveName() == null);
+         this.continueGame.setChecked(false);
+      }
+   }
+
+   private void startLatestSave() {
+      if (this.fadeOut) {
+         return;
+      }
+
+      final String name = this.getLatestSaveName();
+      if (name == null) {
+         return;
+      }
+
+      try {
+         Game.G.loadMetaData(name);
+      } catch (Exception e) {
+         this.toast.show(Quarry.Q.i18n.get("toast.game_not_loaded"));
+         this.refreshContinueButton();
+         return;
+      }
+
+      this.continueGame.setDisabled(true);
+      this.modalOverlay.toFront();
+      this.modalOverlay.addAction(Actions.sequence(Actions.visible(true), Actions.alpha(0.4F, 0.25F, Interpolation.fade)));
+      this.toast.show(Quarry.Q.i18n.get("toast.loading_game"));
+      Quarry.Q.threadPool.execute(new Runnable() {
+         @Override
+         public void run() {
+            Game.G.load(name, new Callback<Object>() {
+               @Override
+               public void call(Object data) {
+                  MainMenu.this.modalOverlay
+                     .addAction(Actions.sequence(Actions.alpha(0.0F, 0.25F, Interpolation.fade), Actions.visible(false)));
+                  if (data instanceof Boolean && (Boolean)data) {
+                     MainMenu.this.fadeOut = true;
+                     MainMenu.this.newGame = false;
+                  } else if (data instanceof Boolean && !(Boolean)data) {
+                     MainMenu.this.toast.show(Quarry.Q.i18n.get("toast.game_not_loaded"));
+                     MainMenu.this.refreshContinueButton();
+                  } else if (data instanceof Exception) {
+                     Quarry.Q.pi.message(1, data);
+                     MainMenu.this.toast.show(Quarry.Q.i18n.get("toast.game_not_loaded"));
+                     MainMenu.this.refreshContinueButton();
+                  } else {
+                     MainMenu.this.refreshContinueButton();
+                  }
+               }
+            });
+         }
+      });
    }
 
    @Override
@@ -148,10 +220,31 @@ public class MainMenu extends Scene implements Ui {
       });
       ((VolumeButton)Util.id("sfx")).initListener();
       ((VolumeButton)Util.id("music")).initListener();
+      this.continueGame = Util.id("continue_game");
+      this.continueGame.addCaptureListener(new ClickListener() {
+         public void clicked(InputEvent event, float x, float y) {
+            Quarry.Q.sound.play(Quarry.Q.clickSfx);
+         }
+      });
+      this.continueGame.addListener(new ChangeListener() {
+         public void changed(ChangeEvent event, Actor actor) {
+            if (!((TextButton)actor).isChecked()) {
+               return;
+            }
+
+            ((TextButton)actor).setChecked(false);
+            MainMenu.this.startLatestSave();
+         }
+      });
       Util.<Actor>id("new_game")
          .addListener(
             new ChangeListener() {
                public void changed(ChangeEvent event, Actor actor) {
+                  if (Game.SANDBOX_MODE) {
+                     Game.SANDBOX_MODE = false;
+                     Game.GOD_MODE = false;
+                  }
+
                   ((TextButton)actor).setChecked(false);
                   MainMenu.this.seedPrompt
                      .show(
@@ -183,6 +276,26 @@ public class MainMenu extends Scene implements Ui {
             Quarry.Q.sound.play(Quarry.Q.clickSfx);
          }
       });
+      this.sandbox = Util.id("sandbox");
+      this.sandbox.addCaptureListener(new ClickListener() {
+         public void clicked(InputEvent event, float x, float y) {
+            Quarry.Q.sound.play(Quarry.Q.clickSfx);
+         }
+      });
+      this.sandbox.addListener(new ChangeListener() {
+         public void changed(ChangeEvent event, Actor actor) {
+            if (!((TextButton)actor).isChecked()) {
+               return;
+            }
+
+            ((TextButton)actor).setChecked(false);
+            Game.SANDBOX_MODE = true;
+            Game.GOD_MODE = true;
+            Generator.G.setSeed((long)(Math.random() * 9.223372E18F));
+            MainMenu.this.fadeOut = true;
+            MainMenu.this.newGame = true;
+         }
+      });
       Util.<Actor>id("credits").addListener(new ChangeListener() {
          public void changed(ChangeEvent event, Actor actor) {
             Quarry.Q.addScene(Credits.instance);
@@ -197,6 +310,11 @@ public class MainMenu extends Scene implements Ui {
       this.tutorial = Util.id("tutorial");
       this.tutorial.addListener(new ChangeListener() {
          public void changed(ChangeEvent event, Actor actor) {
+            if (Game.SANDBOX_MODE) {
+               Game.SANDBOX_MODE = false;
+               Game.GOD_MODE = false;
+            }
+
             Quarry.Q.prefs.putBoolean("tutorial", true).flush();
             MainMenu.this.fadeOut = true;
             MainMenu.this.newGame = true;
@@ -430,9 +548,9 @@ public class MainMenu extends Scene implements Ui {
       Label l = new Label(Quarry.Q.version, Quarry.Q.skin);
       l.setFontScale(0.75F);
       l.setWidth(Const.UI_W);
-      l.setAlignment(1);
-      l.setX(0.0F);
-      l.setY(5.0F);
+      l.setAlignment(Align.bottomLeft);
+      l.setX(12.0F);
+      l.setY(8.0F);
       this.stage.addActor(l);
       this.batch = new SpriteBatch();
 

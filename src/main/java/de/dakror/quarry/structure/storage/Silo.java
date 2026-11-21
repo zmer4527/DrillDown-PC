@@ -23,7 +23,7 @@ public class Silo extends Tank {
          new Dock(0, 0, Direction.West, Dock.DockType.FluidIn),
          new Dock(1, 0, Direction.East, Dock.DockType.FluidOut)
       )
-      .<Schema>components(new CTank(8000000, 1, false).setPumpOutDelay(0.0F).setMaxOutput(1000))
+      .<Schema>components(new CTank(16000000, 1, false).setPumpOutDelay(0.0F).setMaxOutput(1000))
       .<Schema>flags(Schema.Flags.ConfirmDestruction)
       .<Schema>button(new Schema.ButtonDef("icon_pump_out", "button.pump", Schema.ButtonDef.ButtonType.StateToggle, new BiCallback<Boolean, Structure<?>>() {
          public void call(Boolean on, Structure<?> data) {

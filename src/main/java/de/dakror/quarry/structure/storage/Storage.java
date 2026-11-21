@@ -54,7 +54,7 @@ public class Storage extends StorageStructure {
          new Dock(0, 0, Direction.South, Dock.DockType.ItemIn),
          new Dock(2, 0, Direction.South, Dock.DockType.ItemOut)
       )
-      .<Schema>components(new CInventory(200))
+      .<Schema>components(new CInventory(400))
       .<Schema>flags(Schema.Flags.ConfirmDestruction)
       .<Schema>button(new Schema.ButtonDef("icon_pump_out", "button.pump", Schema.ButtonDef.ButtonType.TempRadio, new BiCallback<Boolean, Structure<?>>() {
          public void call(Boolean on, Structure<?> data) {

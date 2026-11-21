@@ -92,6 +92,7 @@ import de.dakror.quarry.structure.logistics.TubeShaftBelow;
 import de.dakror.quarry.structure.power.CableShaft;
 import de.dakror.quarry.structure.power.CableShaftBelow;
 import de.dakror.quarry.structure.power.CopperCable;
+import de.dakror.quarry.structure.power.CopperCableCrossing;
 import de.dakror.quarry.structure.power.GasTurbine;
 import de.dakror.quarry.structure.power.HighPowerShaft;
 import de.dakror.quarry.structure.power.HighPowerShaftBelow;
@@ -132,6 +133,7 @@ import java.util.regex.Pattern;
 
 public class Game extends GameScene {
    public static boolean GOD_MODE = false;
+   public static boolean SANDBOX_MODE = false;
    public static boolean DRAW_DEBUG = false;
    public static boolean FLUIDMODE = false;
    public static boolean FILLMODE = false;
@@ -222,7 +224,8 @@ public class Game extends GameScene {
             int y2 = y1 + d.dy;
             if (x2 >= 0 && y2 >= 0 && x2 < Game.this.layer.width && y2 < Game.this.layer.height) {
                int index = x2 * Game.this.layer.height + y2;
-               if (Game.this.trailStructureCanBePlaced(index, start, end)) {
+               if (Game.this.trailStructureCanBePlaced(index, start, end)
+                  || (index != start && index != end && Game.this.isCableCrossing(x2, y2, d))) {
                   visitor.visit(index);
                }
             }
@@ -469,7 +472,7 @@ public class Game extends GameScene {
       this.layer = l0;
       this.layerIndex = 0;
       this.playTime = 0L;
-      if (Quarry.Q.prefs.getBoolean("tutorial", true)) {
+      if (!SANDBOX_MODE && Quarry.Q.prefs.getBoolean("tutorial", true)) {
          Generator.G.setSeed(5044591726400517120L);
          this.ui.tutorial.next();
          Quarry.Q.prefs.putBoolean("tutorial", false).flush();
@@ -1534,6 +1537,11 @@ public class Game extends GameScene {
       } else {
          boolean end = i == start || i == target;
          if (this.activeStructure instanceof CopperCable) {
+            Structure<?> trail = (Structure<?>)this.activeStructureTrail.get(i);
+            if (trail instanceof CopperCableCrossing) {
+               return true;
+            }
+
             if (this.layer.getCable(x, y) != null && !end || this.layer.isPowerDockCollision(x, y)) {
                return false;
             }
@@ -1573,6 +1581,20 @@ public class Game extends GameScene {
          && !(existing instanceof ConveyorBridge)
          && existing.getSchema().type == StructureType.Conveyor
          && ((Conveyor)existing).getDirection().isPerpendicular(d);
+   }
+
+   public boolean isCableCrossing(int x, int y, Direction d) {
+      if (!(this.activeStructure instanceof CopperCable) || this.activeStructure instanceof CopperCableCrossing) {
+         return false;
+      }
+
+      CopperCable existing = this.layer.getCable(x, y);
+      if (existing == null || existing instanceof CopperCableCrossing) {
+         return false;
+      }
+
+      Direction axis = existing.getStraightAxis();
+      return axis != null && axis.isPerpendicular(d);
    }
 
    public synchronized void addResources(Item.ItemType item, int amount, boolean addToAStorage) {
@@ -1862,6 +1884,7 @@ public class Game extends GameScene {
             .String("name", save)
             .Short("layer", (short)this.layerIndex)
             .Byte("infinite", (byte)(this.infinite ? 1 : 0))
+            .Byte("sandbox", (byte)(SANDBOX_MODE ? 1 : 0))
             .Long("seed", Generator.G.getSeed())
             .LongArray("rng", Generator.G.getState())
             .List("Map", NBT.TagType.Compound);
@@ -2091,6 +2114,13 @@ public class Game extends GameScene {
          this.playTime = meta.Long("playTime", 0L);
          this.lastTimerStart = System.currentTimeMillis();
          this.infinite = data.Byte("infinite", (byte)0) == 1;
+         if (data.Byte("sandbox", (byte)0) == 1) {
+            SANDBOX_MODE = true;
+            GOD_MODE = true;
+         } else if (SANDBOX_MODE) {
+            SANDBOX_MODE = false;
+            GOD_MODE = false;
+         }
          Generator.G.setSeed(data.Long("seed", 0L));
          if (data.has("rng")) {
             Generator.G.setState(data.LongArray("rng"));
@@ -2386,7 +2416,9 @@ public class Game extends GameScene {
                FLUIDMODE = !FLUIDMODE;
                break;
             case 35:
-               GOD_MODE = !GOD_MODE;
+               if (!SANDBOX_MODE) {
+                  GOD_MODE = !GOD_MODE;
+               }
                this.ui.onScienceChange();
                break;
             case 36:
@@ -2501,8 +2533,10 @@ public class Game extends GameScene {
             return true;
          case 35:
             if (Gdx.input.isKeyPressed(129) || Gdx.input.isKeyPressed(130)) {
-               GOD_MODE = !GOD_MODE;
-               this.ui.onScienceChange();
+               if (!SANDBOX_MODE) {
+                  GOD_MODE = !GOD_MODE;
+                  this.ui.onScienceChange();
+               }
             }
 
             return true;
@@ -2885,7 +2919,7 @@ public class Game extends GameScene {
 
                return true;
             } else if ((Game.this.bulkDestroyMode || Game.this.bulkCableMode) && Game.this.activeEnd == 0) {
-               if ((this.isInEndMarkerHitbox(x, y, true) || this.isInEndMarkerHitbox(x, y, false)) && Game.this.endB.x > -1.0F) {
+               if (Game.this.endA.x > -1.0F && Game.this.endB.x > -1.0F) {
                   final Array<Structure<?>> toDelete = new Array();
                   int x1 = (int)Math.min(Game.this.endA.x, Game.this.endB.x);
                   int y1 = (int)Math.min(Game.this.endA.y, Game.this.endB.y);
@@ -3318,7 +3352,24 @@ public class Game extends GameScene {
          }
       }
 
+      private Direction directionBetween(int x1, int y1, int x2, int y2) {
+         if (x1 == x2) {
+            return y2 > y1 ? Direction.North : Direction.South;
+         } else if (y1 == y2) {
+            return x2 > x1 ? Direction.East : Direction.West;
+         }
+
+         return null;
+      }
+
       private Structure<?> createTrailStructure(int x, int y, Direction rotation) {
+         if (rotation != null
+            && Game.this.activeStructure instanceof CopperCable
+            && !(Game.this.activeStructure instanceof CopperCableCrossing)
+            && Game.this.isCableCrossing(x, y, rotation)) {
+            return new CopperCableCrossing(x, y);
+         }
+
          if (rotation != null && Game.this.activeStructure.getSchema().type == StructureType.Conveyor) {
             Structure<?> existing = Game.this.layer.getStructure(x, y);
             if (existing instanceof Conveyor
@@ -3368,7 +3419,8 @@ public class Game extends GameScene {
 
                Structure<?> last = null;
                if (Game.this.activeStructurePath.size() > 0) {
-                  for (int i : Game.this.activeStructurePath) {
+                  for (int k = 0; k < Game.this.activeStructurePath.size(); k++) {
+                     int i = Game.this.activeStructurePath.get(k);
                      int x = i / Game.this.layer.height;
                      int y = i % Game.this.layer.height;
                      Direction rotation = null;
@@ -3380,6 +3432,14 @@ public class Game extends GameScene {
                            } else {
                               rotation = x > last.x ? Direction.West : Direction.East;
                            }
+                        }
+                     } else if (Game.this.activeStructure instanceof CopperCable) {
+                        if (k + 1 < Game.this.activeStructurePath.size()) {
+                           int j = Game.this.activeStructurePath.get(k + 1);
+                           rotation = this.directionBetween(x, y, j / Game.this.layer.height, j % Game.this.layer.height);
+                        } else if (k > 0) {
+                           int j = Game.this.activeStructurePath.get(k - 1);
+                           rotation = this.directionBetween(j / Game.this.layer.height, j % Game.this.layer.height, x, y);
                         }
                      }
 
@@ -3867,7 +3927,29 @@ public class Game extends GameScene {
             }
 
             for (Structure<?> s : Game.this.activeStructureTrail.values()) {
+               if (s instanceof CopperCableCrossing) {
+                  CopperCable existing = Game.this.layer.getCable(s.x, s.y);
+                  if (existing != null && existing != s) {
+                     existing.copyConnectionsTo((CopperCable)s);
+                     Game.this.layer.removeCable(existing);
+                  }
+               }
+            }
+
+            for (Structure<?> s : Game.this.activeStructureTrail.values()) {
                this.placeStructure(Game.this.layer, s);
+            }
+
+            for (Structure<?> s : Game.this.activeStructureTrail.values()) {
+               if (s instanceof CopperCableCrossing) {
+                  ((CopperCable)s).updateFacing(true);
+                  for (Direction d : Direction.values) {
+                     CopperCable neighbour = Game.this.layer.getCable(s.x + d.dx, s.y + d.dy);
+                     if (neighbour instanceof CopperCable) {
+                        neighbour.updateFacing(true);
+                     }
+                  }
+               }
             }
 
             if (Game.this.activeStructure instanceof Conveyor

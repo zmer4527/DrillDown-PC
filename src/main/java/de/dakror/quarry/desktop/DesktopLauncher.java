@@ -68,8 +68,8 @@ public class DesktopLauncher implements PlatformInterface {
 
       config.vSyncEnabled = true;
       config.audioDeviceSimultaneousSources = 32;
-      int versionCode = 122;
-      String version = "v122";
+      int versionCode = 130;
+      String version = "v26.130";
       this.version = version;
       this.arg = arg;
       config.addIcon("icon-16.png", FileType.Internal);

@@ -1385,8 +1385,13 @@ public class GameUi implements Ui {
    public void updateBuildMenuResources() {
       if (this.buildScrollPane.getActor() != this.buildTabs) {
          for (Actor c : ((VerticalGroup)this.buildScrollPane.getActor()).getChildren()) {
-            if (c instanceof Button) {
-               boolean canAfford = true;
+             if (c instanceof Button) {
+                if (Game.GOD_MODE) {
+                   ((Actor)((Table)c).getChildren().get(1)).setColor(Color.WHITE);
+                   continue;
+                }
+
+                boolean canAfford = true;
                if (this.tutorial.getStepNum() > -1) {
                   if (this.tutorial.getStepNum() < 10) {
                      canAfford = c.getUserObject() instanceof Mine;

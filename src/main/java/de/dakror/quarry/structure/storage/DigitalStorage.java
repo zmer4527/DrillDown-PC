@@ -52,7 +52,7 @@ public class DigitalStorage extends Storage {
          new Dock(2, 1, Direction.East, Dock.DockType.ItemOut),
          new Dock(1, 2, Direction.North, Dock.DockType.Power)
       )
-      .<Schema>components(new CInventory(20000).setPumpOutSpeed(0.0F))
+      .<Schema>components(new CInventory(40000).setPumpOutSpeed(0.0F))
       .<Schema>flags(Schema.Flags.ConfirmDestruction)
       .<Schema>button(new Schema.ButtonDef("icon_pump_out", "button.pump", Schema.ButtonDef.ButtonType.TempRadio, new BiCallback<Boolean, Structure<?>>() {
          public void call(Boolean on, Structure<?> data) {

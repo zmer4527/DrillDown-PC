@@ -30,7 +30,7 @@ public class Warehouse extends Storage {
          new Dock(0, 0, Direction.South, Dock.DockType.ItemIn),
          new Dock(9, 0, Direction.South, Dock.DockType.ItemOut)
       )
-      .<Schema>components(new CInventory(5000).setPumpOutSpeed(0.25F))
+      .<Schema>components(new CInventory(10000).setPumpOutSpeed(0.25F))
       .<Schema>flags(Schema.Flags.ConfirmDestruction, Schema.Flags.MirroredTextureHorizontal, Schema.Flags.MirroredTextureVertical)
       .<Schema>button(new Schema.ButtonDef("icon_pump_out", "button.pump", Schema.ButtonDef.ButtonType.TempRadio, new BiCallback<Boolean, Structure<?>>() {
          public void call(Boolean on, Structure<?> data) {

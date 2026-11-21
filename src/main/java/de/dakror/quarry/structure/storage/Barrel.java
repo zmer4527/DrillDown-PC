@@ -36,7 +36,7 @@ public class Barrel extends StorageStructure {
          new Dock(0, 0, Direction.South, Dock.DockType.ItemOut),
          new Dock(0, 0, Direction.North, Dock.DockType.ItemIn)
       )
-      .<Schema>components(new CSingleInventory(350, 0, false))
+      .<Schema>components(new CSingleInventory(700, 0, false))
       .<Schema>flags(Schema.Flags.ConfirmDestruction)
       .<Schema>sciences(Science.ScienceType.BetterStorage)
       .<Schema>button(new Schema.ButtonDef("icon_pump_out", "button.pump", Schema.ButtonDef.ButtonType.StateToggle, new BiCallback<Boolean, Structure<?>>() {

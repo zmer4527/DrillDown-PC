@@ -35,7 +35,7 @@ public class Tank extends Structure<Schema> {
          new Dock(0, 0, Direction.West, Dock.DockType.FluidIn),
          new Dock(3, 0, Direction.East, Dock.DockType.FluidOut)
       )
-      .<Schema>components(new CTank(20000, 1, false).setPumpOutDelay(0.0F).setMaxOutput(50))
+      .<Schema>components(new CTank(40000, 1, false).setPumpOutDelay(0.0F).setMaxOutput(50))
       .<Schema>flags(Schema.Flags.ConfirmDestruction)
       .<Schema>button(new Schema.ButtonDef("icon_pump_out", "button.pump", Schema.ButtonDef.ButtonType.StateToggle, new BiCallback<Boolean, Structure<?>>() {
          public void call(Boolean on, Structure<?> data) {

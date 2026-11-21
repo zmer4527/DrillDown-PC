@@ -36,7 +36,11 @@ public class CopperCable extends Structure<Schema> {
    int[] structs;
 
    public CopperCable(int x, int y) {
-      super(x, y, classSchema);
+      this(x, y, classSchema);
+   }
+
+   protected CopperCable(int x, int y, Schema schema) {
+      super(x, y, schema);
       Arrays.fill(this.dirs, Dock.ConnectionType.No);
    }
 
@@ -178,7 +182,7 @@ public class CopperCable extends Structure<Schema> {
    public boolean connectTo(Structure<?> s, Direction myDirectionToS) {
       if (this.structures[myDirectionToS.ordinal()] != null && this.structures[myDirectionToS.ordinal()].equals(s)) {
          return true;
-      } else if (this.directions == 2) {
+      } else if (this.directions >= this.connectionLimit()) {
          return false;
       } else {
          Dock.ConnectionType old = this.dirs[myDirectionToS.ordinal()];
@@ -247,11 +251,12 @@ public class CopperCable extends Structure<Schema> {
          }
       }
 
-      if (this.directions < 2) {
+      int limit = this.connectionLimit();
+      if (this.directions < limit) {
          label118:
          for (int i = 0; i < 2; i++) {
             for (Direction d : Direction.values) {
-               if (this.directions >= 2) {
+               if (this.directions >= limit) {
                   break label118;
                }
 
@@ -291,6 +296,36 @@ public class CopperCable extends Structure<Schema> {
       return this.directions;
    }
 
+   protected int connectionLimit() {
+      return 2;
+   }
+
+   public Direction getStraightAxis() {
+      int first = -1;
+      int second = -1;
+      int count = 0;
+
+      for (int i = 0; i < 4; i++) {
+         if (this.dirs[i] != Dock.ConnectionType.No) {
+            count++;
+            if (first < 0) {
+               first = i;
+            } else if (second < 0) {
+               second = i;
+            }
+         }
+      }
+
+      return count == 2 && (first + 2) % 4 == second ? Direction.values[first] : null;
+   }
+
+   public void copyConnectionsTo(CopperCable target) {
+      System.arraycopy(this.dirs, 0, target.dirs, 0, 4);
+      System.arraycopy(this.structures, 0, target.structures, 0, 4);
+      target.directions = this.directions;
+      target.cachedEnd = null;
+   }
+
    public CopperCable walkToEnd() {
       if (this.cachedEnd != null) {
          return this.cachedEnd;
@@ -300,19 +335,29 @@ public class CopperCable extends Structure<Schema> {
          HashSet<CopperCable> seen = new HashSet<>();
 
          while (c != null) {
+            int straight = c instanceof CopperCableCrossing && prevDirection != -1 ? (prevDirection + 2) % 4 : -1;
+            boolean moved = false;
+
             for (int i = 0; i < 4; i++) {
-               if (i != prevDirection
-                  && c.dirs[i] == Dock.ConnectionType.Open
-                  && c.structures[i] instanceof CopperCable
-                  && !Game.G.activeStructureTrail.containsValue(c.structures[i], true)
-                  && !seen.contains(c)) {
-                  seen.add(c);
-                  c = (CopperCable)c.structures[i];
-                  prevDirection = (i + 2) % 4;
-                  break;
+               if (straight != -1 && i != straight
+                  || i == prevDirection
+                  || c.dirs[i] != Dock.ConnectionType.Open
+                  || !(c.structures[i] instanceof CopperCable)
+                  || Game.G.activeStructureTrail.containsValue(c.structures[i], true)
+                  || seen.contains(c)) {
+                  continue;
                }
+
+               seen.add(c);
+               c = (CopperCable)c.structures[i];
+               prevDirection = (i + 2) % 4;
+               moved = true;
+               break;
             }
-            break;
+
+            if (!moved) {
+               break;
+            }
          }
 
          this.cachedEnd = c;
@@ -321,14 +366,16 @@ public class CopperCable extends Structure<Schema> {
    }
 
    protected Dock.ConnectionType getConnection(Structure<?> s, Direction d) {
-      if (s.getSchema().type == StructureType.CopperCable) {
+      if (s instanceof CopperCable) {
          CopperCable c = (CopperCable)s;
-         if (c.dirs[d.inv().ordinal()] == Dock.ConnectionType.Open) {
+         if (c instanceof CopperCableCrossing || this instanceof CopperCableCrossing) {
+            return Dock.ConnectionType.Open;
+         } else if (c.dirs[d.inv().ordinal()] == Dock.ConnectionType.Open) {
             return Dock.ConnectionType.Open;
          } else if (c.dirs[d.inv().ordinal()] == Dock.ConnectionType.Dock) {
             return Dock.ConnectionType.No;
          } else {
-            return c.directions < 2 ? Dock.ConnectionType.Open : Dock.ConnectionType.No;
+            return c.directions < c.connectionLimit() ? Dock.ConnectionType.Open : Dock.ConnectionType.No;
          }
       } else {
          for (Dock k : s.getDocks()) {

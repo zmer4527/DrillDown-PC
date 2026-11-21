@@ -30,6 +30,12 @@
 			"g": 0,
 			"r": 0
 		},
+		"gray": {
+			"a": 1,
+			"b": 0.5,
+			"g": 0.5,
+			"r": 0.5
+		},
 		"shadow": {
 			"a": 0.55,
 			"b": 0,
@@ -145,7 +151,9 @@
 			"fontColor": "white",
 			"up": "button-black",
 			"down": "button",
-			"checked": "button"
+			"checked": "button",
+			"disabled": "button-black",
+			"disabledFontColor": "gray"
 		}
 	},
 	"com.badlogic.gdx.scenes.scene2d.ui.ImageButton$ImageButtonStyle": {

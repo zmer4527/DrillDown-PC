@@ -32,3 +32,6 @@ java -jar build/libs/DrillDown-1.0.jar   # 运行
 ## 许可证
 
 基于 Dakror 的 **Drill Down**（Apache License 2.0），原版权归 Dakror 所有。
+
+理论上Linux系统在安装了64位JDK=>8的情况下可以直接通过
+java -jar DrillDown-1.0.jar运行
